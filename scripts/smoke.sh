@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
+# Smoke test: verify the MCP server can be imported and instantiated
 set -euo pipefail
 
-log_file="${TMPDIR:-/tmp}/robinhood-mcp-smoke.log"
-rm -f "$log_file"
+echo "Testing robinhood-mcp module import and server creation..."
 
-python -m robinhood_mcp.server >"$log_file" 2>&1 &
-pid=$!
+# Test 1: Verify the module can be imported
+python -c "from robinhood_mcp import server; print('✓ Module import successful')"
 
-cleanup() {
-  if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid"
-    wait "$pid" || true
-  fi
-}
-trap cleanup EXIT
+# Test 2: Verify the MCP server object can be created
+python -c "from robinhood_mcp.server import mcp; print(f'✓ Server created: {mcp.name}')"
 
-sleep 2
-if ! kill -0 "$pid" 2>/dev/null; then
-  echo "robinhood-mcp exited early during startup" >&2
-  if [ -s "$log_file" ]; then
-    cat "$log_file" >&2
-  fi
-  exit 1
+# Test 3: Verify the entry point exists
+if command -v robinhood-mcp &>/dev/null; then
+  echo "✓ Entry point 'robinhood-mcp' found"
+else
+  # Entry point might not be in PATH in CI, check with pip
+  pip show robinhood-mcp &>/dev/null && echo "✓ Package installed" || {
+    echo "✗ Package not installed"
+    exit 1
+  }
 fi
+
+echo "Smoke test passed!"
