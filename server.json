@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.verygoodplugins/robinhood-mcp",
+  "title": "Robinhood Portfolio Research",
+  "description": "Read-only research tools for Robinhood portfolio data",
+  "version": "0.1.0",
+  "websiteUrl": "https://verygoodplugins.com/?utm_source=mcp-registry",
+  "repository": {
+    "url": "https://github.com/verygoodplugins/robinhood-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "robinhood-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
+  "tools": [
+    {"name": "robinhood_get_portfolio", "description": "Get portfolio value and performance"},
+    {"name": "robinhood_get_positions", "description": "Get current stock holdings"},
+    {"name": "robinhood_get_watchlist", "description": "Get watchlist stocks"},
+    {"name": "robinhood_get_quote", "description": "Get real-time stock quote"},
+    {"name": "robinhood_get_fundamentals", "description": "Get P/E, market cap, dividends"},
+    {"name": "robinhood_get_historicals", "description": "Get price history"},
+    {"name": "robinhood_get_news", "description": "Get stock news"},
+    {"name": "robinhood_get_earnings", "description": "Get earnings dates and estimates"},
+    {"name": "robinhood_get_ratings", "description": "Get analyst ratings"},
+    {"name": "robinhood_get_dividends", "description": "Get dividend payment history"},
+    {"name": "robinhood_get_options_positions", "description": "Get options positions"},
+    {"name": "robinhood_search_symbols", "description": "Search for stock symbols"}
+  ]
+}

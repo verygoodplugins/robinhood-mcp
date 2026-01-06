@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robinhood-mcp"
+version = "0.1.0"
+description = "Read-only MCP server for Robinhood portfolio research"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Jack Arturo", email = "jack@verygoodplugins.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "fastmcp>=0.4.0",
+    "robin_stocks>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "pyotp>=2.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+robinhood-mcp = "robinhood_mcp.server:main"
+
+[project.urls]
+Homepage = "https://verygoodplugins.com/?utm_source=github"
+Repository = "https://github.com/verygoodplugins/robinhood-mcp"
+
+[tool.mcp]
+name = "io.github.verygoodplugins/robinhood-mcp"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
