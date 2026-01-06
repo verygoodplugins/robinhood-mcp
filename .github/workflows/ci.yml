@@ -37,6 +37,10 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov
           pytest --cov=src --cov-report=xml
 
+      - name: Smoke test MCP server startup
+        run: |
+          ./scripts/smoke.sh
+
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:

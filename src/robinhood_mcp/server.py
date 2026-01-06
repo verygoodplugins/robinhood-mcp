@@ -26,11 +26,14 @@ from .tools import (
 # Load environment variables
 load_dotenv()
 
-# Initialize FastMCP server
-mcp = FastMCP(
-    "robinhood-mcp",
-    description="Read-only research tools for Robinhood portfolio data",
-)
+# Initialize FastMCP server (older versions don't accept description kwarg).
+try:
+    mcp = FastMCP(
+        "robinhood-mcp",
+        description="Read-only research tools for Robinhood portfolio data",
+    )
+except TypeError:
+    mcp = FastMCP("robinhood-mcp")
 
 # Track login state
 _login_attempted = False

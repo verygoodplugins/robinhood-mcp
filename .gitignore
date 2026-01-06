@@ -52,3 +52,6 @@ dmypy.json
 
 # Robin stocks session
 .tokens/
+
+# UV lock file
+uv.lock
