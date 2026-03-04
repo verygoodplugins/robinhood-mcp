@@ -7,7 +7,7 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-from .auth import AuthenticationError, is_logged_in, login
+from .auth import AuthenticationError, EnvironmentVariablesError, is_logged_in, login
 from .tools import (
     RobinhoodError,
     get_dividends,
@@ -47,8 +47,8 @@ def _ensure_logged_in() -> None:
     global _login_attempted, _login_error
 
     with _login_lock:
-        # Only credential/config errors should be treated as permanent
-        if _login_error and "environment variables required" in _login_error:
+        # Only explicit credential/config errors are treated as permanent.
+        if _login_error:
             raise RobinhoodError(f"Not logged in: {_login_error}")
 
         if not _login_attempted or not is_logged_in():
@@ -57,9 +57,12 @@ def _ensure_logged_in() -> None:
             try:
                 login()
                 print("[robinhood-mcp] Logged in to Robinhood", file=sys.stderr)
+            except EnvironmentVariablesError as e:
+                _login_error = str(e)
+                print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
+                raise RobinhoodError(f"Not logged in: {_login_error}") from e
             except AuthenticationError as e:
                 message = str(e)
-                _login_error = message if "environment variables required" in message else None
                 print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
                 raise RobinhoodError(f"Not logged in: {message}") from e
 

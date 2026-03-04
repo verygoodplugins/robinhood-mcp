@@ -33,6 +33,12 @@ class AuthenticationError(Exception):
     pass
 
 
+class EnvironmentVariablesError(AuthenticationError):
+    """Raised when required authentication environment variables are missing."""
+
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Monkey-patch robin_stocks' broken _validate_sherrif_id with a working
 # polling-based version that doesn't call input().
@@ -56,7 +62,7 @@ def _patched_validate_sherrif_id(
     data = request_post(url=user_machine_url, payload=payload, json=True)
 
     if "id" not in data:
-        raise Exception(f"Verification workflow failed — no inquiry ID: {data}")
+        raise AuthenticationError(f"Verification workflow failed — no inquiry ID: {data}")
 
     inquiries_url = f"https://api.robinhood.com/pathfinder/inquiries/{data['id']}/user_view/"
     res = request_get(inquiries_url)
@@ -65,7 +71,7 @@ def _patched_validate_sherrif_id(
     ctx = res.get("context") or res.get("type_context", {}).get("context", {})
     challenge_id = ctx.get("sheriff_challenge", {}).get("id") if isinstance(ctx, dict) else None
     if not challenge_id:
-        raise Exception(f"Could not extract sheriff challenge ID from inquiry: {res}")
+        raise AuthenticationError(f"Could not extract sheriff challenge ID from inquiry: {res}")
 
     # If TOTP mfa_code is available, try direct challenge response first
     if mfa_code:
@@ -82,7 +88,7 @@ def _patched_validate_sherrif_id(
             ).get("result", "")
             if result == "workflow_status_approved":
                 return
-            raise Exception(f"TOTP validated but workflow not approved: {result}")
+            raise AuthenticationError(f"TOTP validated but workflow not approved: {result}")
 
     # Poll for mobile app approval
     prompts_url = f"https://api.robinhood.com/push/{challenge_id}/get_prompts_status/"
@@ -108,11 +114,11 @@ def _patched_validate_sherrif_id(
             if result == "workflow_status_approved":
                 print("[robinhood-mcp] Login approved!", file=sys.stderr)
                 return
-            raise Exception(f"Challenge validated but workflow not approved: {result}")
+            raise AuthenticationError(f"Challenge validated but workflow not approved: {result}")
         elapsed = int(time.time() - start)
         print(f"[robinhood-mcp] Waiting for approval... ({elapsed}s)", file=sys.stderr)
 
-    raise Exception("Login timed out after 2 minutes. Restart server and approve in app.")
+    raise AuthenticationError("Login timed out after 2 minutes. Restart server and approve in app.")
 
 
 # Apply the monkey-patch before any login calls
@@ -187,7 +193,7 @@ def login(
     totp_secret = totp_secret or os.getenv("ROBINHOOD_TOTP_SECRET")
 
     if not username or not password:
-        raise AuthenticationError(
+        raise EnvironmentVariablesError(
             "ROBINHOOD_USERNAME and ROBINHOOD_PASSWORD environment variables required"
         )
 
@@ -207,7 +213,7 @@ def login(
         return result
 
     except AuthenticationError as e:
-        if "environment variables required" not in str(e):
+        if not isinstance(e, EnvironmentVariablesError):
             _clear_stale_pickle()
         raise
     except Exception as e:
