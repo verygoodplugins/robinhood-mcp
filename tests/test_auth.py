@@ -6,6 +6,7 @@ import pytest
 
 from robinhood_mcp.auth import (
     AuthenticationError,
+    _clear_stale_pickle,
     get_totp_code,
     is_logged_in,
     login,
@@ -101,6 +102,66 @@ class TestLogin:
         with pytest.raises(AuthenticationError) as exc_info:
             login()
         assert "empty result" in str(exc_info.value)
+
+    @patch.dict(
+        "os.environ",
+        {"ROBINHOOD_USERNAME": "test@example.com", "ROBINHOOD_PASSWORD": "secret"},
+        clear=True,
+    )
+    @patch("robinhood_mcp.auth._clear_stale_pickle")
+    @patch("robinhood_mcp.auth.rh.login")
+    def test_preserves_auth_error_when_cleanup_fails(
+        self, mock_login: MagicMock, mock_clear_stale_pickle: MagicMock
+    ):
+        """Should keep original AuthenticationError if cache cleanup raises OSError."""
+        mock_login.return_value = None
+        mock_clear_stale_pickle.side_effect = OSError("permission denied")
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            login()
+
+        assert "Login returned empty result" in str(exc_info.value)
+
+    @patch.dict(
+        "os.environ",
+        {"ROBINHOOD_USERNAME": "test@example.com", "ROBINHOOD_PASSWORD": "secret"},
+        clear=True,
+    )
+    @patch("robinhood_mcp.auth._clear_stale_pickle")
+    @patch("robinhood_mcp.auth.rh.login")
+    def test_preserves_wrapped_login_error_when_cleanup_fails(
+        self, mock_login: MagicMock, mock_clear_stale_pickle: MagicMock
+    ):
+        """Should still raise wrapped login AuthenticationError if cleanup fails."""
+        mock_login.side_effect = RuntimeError("network down")
+        mock_clear_stale_pickle.side_effect = OSError("permission denied")
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            login()
+
+        assert "Login failed: network down" in str(exc_info.value)
+
+
+class TestClearStalePickle:
+    """Tests for stale session cache cleanup."""
+
+    @patch("robinhood_mcp.auth.os.path.isfile")
+    @patch("robinhood_mcp.auth.os.remove")
+    @patch("robinhood_mcp.auth.logger.exception")
+    def test_logs_and_reraises_oserror(
+        self,
+        mock_logger_exception: MagicMock,
+        mock_remove: MagicMock,
+        mock_isfile: MagicMock,
+    ):
+        """Should log and re-raise OSError when cache removal fails."""
+        mock_isfile.return_value = True
+        mock_remove.side_effect = OSError("permission denied")
+
+        with pytest.raises(OSError):
+            _clear_stale_pickle()
+
+        mock_logger_exception.assert_called_once()
 
 
 class TestLogout:
