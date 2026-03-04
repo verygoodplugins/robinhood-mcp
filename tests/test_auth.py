@@ -103,6 +103,44 @@ class TestLogin:
             login()
         assert "empty result" in str(exc_info.value)
 
+    @patch.dict(
+        "os.environ",
+        {"ROBINHOOD_USERNAME": "test@example.com", "ROBINHOOD_PASSWORD": "secret"},
+        clear=True,
+    )
+    @patch("robinhood_mcp.auth._clear_stale_pickle")
+    @patch("robinhood_mcp.auth.rh.login")
+    def test_preserves_auth_error_when_cleanup_fails(
+        self, mock_login: MagicMock, mock_clear_stale_pickle: MagicMock
+    ):
+        """Should keep original AuthenticationError if cache cleanup raises OSError."""
+        mock_login.return_value = None
+        mock_clear_stale_pickle.side_effect = OSError("permission denied")
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            login()
+
+        assert "Login returned empty result" in str(exc_info.value)
+
+    @patch.dict(
+        "os.environ",
+        {"ROBINHOOD_USERNAME": "test@example.com", "ROBINHOOD_PASSWORD": "secret"},
+        clear=True,
+    )
+    @patch("robinhood_mcp.auth._clear_stale_pickle")
+    @patch("robinhood_mcp.auth.rh.login")
+    def test_preserves_wrapped_login_error_when_cleanup_fails(
+        self, mock_login: MagicMock, mock_clear_stale_pickle: MagicMock
+    ):
+        """Should still raise wrapped login AuthenticationError if cleanup fails."""
+        mock_login.side_effect = RuntimeError("network down")
+        mock_clear_stale_pickle.side_effect = OSError("permission denied")
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            login()
+
+        assert "Login failed: network down" in str(exc_info.value)
+
 
 class TestClearStalePickle:
     """Tests for stale session cache cleanup."""

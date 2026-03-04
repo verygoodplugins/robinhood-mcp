@@ -222,11 +222,23 @@ def login(
 
     except AuthenticationError as e:
         if not isinstance(e, EnvironmentVariablesError):
-            _clear_stale_pickle()
+            try:
+                _clear_stale_pickle()
+            except OSError:
+                logger.warning(
+                    "Ignoring stale session cache cleanup failure while propagating auth error",
+                    exc_info=True,
+                )
         raise
     except Exception as e:
         # If login failed, clear pickle so next attempt starts clean
-        _clear_stale_pickle()
+        try:
+            _clear_stale_pickle()
+        except OSError:
+            logger.warning(
+                "Ignoring stale session cache cleanup failure while handling login exception",
+                exc_info=True,
+            )
         raise AuthenticationError(f"Login failed: {e}") from e
 
 
