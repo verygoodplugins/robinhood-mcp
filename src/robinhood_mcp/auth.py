@@ -14,6 +14,7 @@ monkey-patch it at import time with a polling-based version that
 sends a push notification and waits for mobile app approval.
 """
 
+import inspect
 import os
 import sys
 import time
@@ -115,8 +116,17 @@ def _patched_validate_sherrif_id(
 
 
 # Apply the monkey-patch before any login calls
-if hasattr(rh_auth, "_validate_sherrif_id") and callable(rh_auth._validate_sherrif_id):
-    rh_auth._validate_sherrif_id = _patched_validate_sherrif_id
+_target = getattr(rh_auth, "_validate_sherrif_id", None)
+if callable(_target):
+    _params = tuple(inspect.signature(_target).parameters)
+    if _params[:2] == ("device_token", "workflow_id"):
+        rh_auth._validate_sherrif_id = _patched_validate_sherrif_id
+    else:
+        print(
+            "[robinhood-mcp] WARNING: unexpected _validate_sherrif_id "
+            f"signature {_params}. Upstream robin_stocks API may have changed.",
+            file=sys.stderr,
+        )
 else:
     print(
         "[robinhood-mcp] WARNING: rh_auth._validate_sherrif_id not found "

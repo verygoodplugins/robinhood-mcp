@@ -1,6 +1,7 @@
 """FastMCP server for Robinhood portfolio research."""
 
 import sys
+import threading
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -38,27 +39,29 @@ except TypeError:
 # Track login state
 _login_attempted = False
 _login_error: str | None = None
+_login_lock = threading.Lock()
 
 
 def _ensure_logged_in() -> None:
     """Ensure we're logged in before API calls, re-attempting if session expired."""
     global _login_attempted, _login_error
 
-    # Only credential/config errors should be treated as permanent
-    if _login_error and "environment variables required" in _login_error:
-        raise RobinhoodError(f"Not logged in: {_login_error}")
+    with _login_lock:
+        # Only credential/config errors should be treated as permanent
+        if _login_error and "environment variables required" in _login_error:
+            raise RobinhoodError(f"Not logged in: {_login_error}")
 
-    if not _login_attempted or not is_logged_in():
-        _login_attempted = True
-        _login_error = None
-        try:
-            login()
-            print("[robinhood-mcp] Logged in to Robinhood", file=sys.stderr)
-        except AuthenticationError as e:
-            message = str(e)
-            _login_error = message if "environment variables required" in message else None
-            print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
-            raise RobinhoodError(f"Not logged in: {message}") from e
+        if not _login_attempted or not is_logged_in():
+            _login_attempted = True
+            _login_error = None
+            try:
+                login()
+                print("[robinhood-mcp] Logged in to Robinhood", file=sys.stderr)
+            except AuthenticationError as e:
+                message = str(e)
+                _login_error = message if "environment variables required" in message else None
+                print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
+                raise RobinhoodError(f"Not logged in: {message}") from e
 
 
 @mcp.tool()
