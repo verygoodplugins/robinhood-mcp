@@ -72,19 +72,3 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-
-  announce:
-    needs: [release-please, pypi-publish]
-    if: ${{ needs.release-please.outputs.release_created }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Post to Slack
-        if: ${{ vars.SLACK_WEBHOOK_URL }}
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ vars.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {
-              "text": "🚀 ${{ github.repository }} ${{ needs.release-please.outputs.tag_name }} released!\n\nhttps://github.com/${{ github.repository }}/releases/tag/${{ needs.release-please.outputs.tag_name }}"
-            }
