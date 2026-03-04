@@ -55,3 +55,5 @@ dmypy.json
 
 # UV lock file
 uv.lock
+.mcpregistry_github_token
+.mcpregistry_registry_token
