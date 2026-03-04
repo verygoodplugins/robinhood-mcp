@@ -22,8 +22,8 @@ from typing import Any
 import pyotp
 import robin_stocks.robinhood as rh
 import robin_stocks.robinhood.authentication as rh_auth
-from robin_stocks.robinhood.helper import request_get, request_post
 from dotenv import load_dotenv
+from robin_stocks.robinhood.helper import request_get, request_post
 
 
 class AuthenticationError(Exception):
@@ -36,6 +36,7 @@ class AuthenticationError(Exception):
 # Monkey-patch robin_stocks' broken _validate_sherrif_id with a working
 # polling-based version that doesn't call input().
 # ---------------------------------------------------------------------------
+
 
 def _patched_validate_sherrif_id(
     device_token: str, workflow_id: str, mfa_code: str | None = None
@@ -75,7 +76,9 @@ def _patched_validate_sherrif_id(
                 payload={"sequence": 0, "user_input": {"status": "continue"}},
                 json=True,
             )
-            result = inq_resp.get("type_context", {}).get("result", "")
+            result = inq_resp.get("context", {}).get("result") or inq_resp.get(
+                "type_context", {}
+            ).get("result", "")
             if result == "workflow_status_approved":
                 return
             raise Exception(f"TOTP validated but workflow not approved: {result}")
@@ -98,7 +101,9 @@ def _patched_validate_sherrif_id(
                 payload={"sequence": 0, "user_input": {"status": "continue"}},
                 json=True,
             )
-            result = inq_resp.get("type_context", {}).get("result", "")
+            result = inq_resp.get("context", {}).get("result") or inq_resp.get(
+                "type_context", {}
+            ).get("result", "")
             if result == "workflow_status_approved":
                 print("[robinhood-mcp] Login approved!", file=sys.stderr)
                 return
@@ -110,12 +115,21 @@ def _patched_validate_sherrif_id(
 
 
 # Apply the monkey-patch before any login calls
-rh_auth._validate_sherrif_id = _patched_validate_sherrif_id
+if hasattr(rh_auth, "_validate_sherrif_id") and callable(rh_auth._validate_sherrif_id):
+    rh_auth._validate_sherrif_id = _patched_validate_sherrif_id
+else:
+    print(
+        "[robinhood-mcp] WARNING: rh_auth._validate_sherrif_id not found "
+        "or not callable. The upstream robin_stocks API may have changed "
+        "— consider pinning or upgrading the dependency.",
+        file=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def get_totp_code(secret: str | None) -> str | None:
     """Generate TOTP code from a base32 authenticator-app secret."""
@@ -182,7 +196,9 @@ def login(
 
         return result
 
-    except AuthenticationError:
+    except AuthenticationError as e:
+        if "environment variables required" not in str(e):
+            _clear_stale_pickle()
         raise
     except Exception as e:
         # If login failed, clear pickle so next attempt starts clean

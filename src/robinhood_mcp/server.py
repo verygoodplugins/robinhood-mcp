@@ -44,8 +44,8 @@ def _ensure_logged_in() -> None:
     """Ensure we're logged in before API calls, re-attempting if session expired."""
     global _login_attempted, _login_error
 
-    # Permanent credential failure — no point retrying
-    if _login_error:
+    # Only credential/config errors should be treated as permanent
+    if _login_error and "environment variables required" in _login_error:
         raise RobinhoodError(f"Not logged in: {_login_error}")
 
     if not _login_attempted or not is_logged_in():
@@ -55,9 +55,10 @@ def _ensure_logged_in() -> None:
             login()
             print("[robinhood-mcp] Logged in to Robinhood", file=sys.stderr)
         except AuthenticationError as e:
-            _login_error = str(e)
+            message = str(e)
+            _login_error = message if "environment variables required" in message else None
             print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
-            raise RobinhoodError(f"Not logged in: {_login_error}") from e
+            raise RobinhoodError(f"Not logged in: {message}") from e
 
 
 @mcp.tool()
