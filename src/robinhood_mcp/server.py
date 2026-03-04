@@ -2,6 +2,7 @@
 
 import sys
 import threading
+import time
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -40,28 +41,55 @@ except TypeError:
 _login_attempted = False
 _login_error: str | None = None
 _login_lock = threading.Lock()
+_cached_login_status: bool | None = None
+_cached_login_status_ts = 0.0
+_LOGIN_STATUS_TTL_SECONDS = 5.0
+
+
+def _is_session_valid_cached() -> bool:
+    """Return cached login status when fresh, otherwise probe Robinhood once."""
+    global _cached_login_status, _cached_login_status_ts
+
+    now = time.monotonic()
+    if (
+        _cached_login_status is not None
+        and (now - _cached_login_status_ts) < _LOGIN_STATUS_TTL_SECONDS
+    ):
+        return _cached_login_status
+
+    status = is_logged_in()
+    _cached_login_status = status
+    _cached_login_status_ts = now
+    return status
 
 
 def _ensure_logged_in() -> None:
     """Ensure we're logged in before API calls, re-attempting if session expired."""
-    global _login_attempted, _login_error
+    global _login_attempted, _login_error, _cached_login_status, _cached_login_status_ts
 
     with _login_lock:
         # Only explicit credential/config errors are treated as permanent.
         if _login_error:
             raise RobinhoodError(f"Not logged in: {_login_error}")
 
-        if not _login_attempted or not is_logged_in():
+        session_valid = _is_session_valid_cached() if _login_attempted else False
+        if not _login_attempted or not session_valid:
             _login_attempted = True
             _login_error = None
             try:
                 login()
+                _cached_login_status = True
+                _cached_login_status_ts = time.monotonic()
                 print("[robinhood-mcp] Logged in to Robinhood", file=sys.stderr)
             except EnvironmentVariablesError as e:
+                _cached_login_status = False
+                _cached_login_status_ts = time.monotonic()
                 _login_error = str(e)
                 print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
                 raise RobinhoodError(f"Not logged in: {_login_error}") from e
             except AuthenticationError as e:
+                _cached_login_status = False
+                _cached_login_status_ts = time.monotonic()
                 message = str(e)
                 print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
                 raise RobinhoodError(f"Not logged in: {message}") from e

@@ -15,6 +15,7 @@ sends a push notification and waits for mobile app approval.
 """
 
 import inspect
+import logging
 import os
 import sys
 import time
@@ -25,6 +26,8 @@ import robin_stocks.robinhood as rh
 import robin_stocks.robinhood.authentication as rh_auth
 from dotenv import load_dotenv
 from robin_stocks.robinhood.helper import request_get, request_post
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationError(Exception):
@@ -62,7 +65,7 @@ def _patched_validate_sherrif_id(
     data = request_post(url=user_machine_url, payload=payload, json=True)
 
     if "id" not in data:
-        raise AuthenticationError(f"Verification workflow failed — no inquiry ID: {data}")
+        raise AuthenticationError("Verification workflow failed — missing inquiry ID")
 
     inquiries_url = f"https://api.robinhood.com/pathfinder/inquiries/{data['id']}/user_view/"
     res = request_get(inquiries_url)
@@ -71,7 +74,11 @@ def _patched_validate_sherrif_id(
     ctx = res.get("context") or res.get("type_context", {}).get("context", {})
     challenge_id = ctx.get("sheriff_challenge", {}).get("id") if isinstance(ctx, dict) else None
     if not challenge_id:
-        raise AuthenticationError(f"Could not extract sheriff challenge ID from inquiry: {res}")
+        inquiry_id = data.get("id")
+        details = f" for inquiry {inquiry_id}" if inquiry_id else ""
+        raise AuthenticationError(
+            f"Verification workflow failed — missing sheriff challenge ID{details}"
+        )
 
     # If TOTP mfa_code is available, try direct challenge response first
     if mfa_code:
@@ -164,8 +171,9 @@ def _clear_stale_pickle() -> None:
         try:
             os.remove(pickle_path)
             print(f"[robinhood-mcp] Cleared stale session cache: {pickle_path}", file=sys.stderr)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.exception("Failed to clear stale session cache at %s: %s", pickle_path, e)
+            raise
 
 
 def login(
