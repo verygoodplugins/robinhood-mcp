@@ -5,6 +5,13 @@ verification_workflow device-approval flow (required since Dec 2024).
 On first run the server prints a prompt to approve the login in the
 Robinhood mobile app; after that the session is cached in
 ~/.tokens/robinhood.pickle so no interaction is needed on restart.
+
+Key insight: robin_stocks' rh.login() handles verification_workflow
+INTERNALLY via _validate_sherrif_id — it never returns the workflow
+dict to the caller. The PyPI version of that function is broken
+(calls input() which blocks forever on a headless server). We
+monkey-patch it at import time with a polling-based version that
+sends a push notification and waits for mobile app approval.
 """
 
 import os
@@ -14,6 +21,7 @@ from typing import Any
 
 import pyotp
 import robin_stocks.robinhood as rh
+import robin_stocks.robinhood.authentication as rh_auth
 from robin_stocks.robinhood.helper import request_get, request_post
 from dotenv import load_dotenv
 
@@ -23,6 +31,91 @@ class AuthenticationError(Exception):
 
     pass
 
+
+# ---------------------------------------------------------------------------
+# Monkey-patch robin_stocks' broken _validate_sherrif_id with a working
+# polling-based version that doesn't call input().
+# ---------------------------------------------------------------------------
+
+def _patched_validate_sherrif_id(
+    device_token: str, workflow_id: str, mfa_code: str | None = None
+) -> None:
+    """Replacement for robin_stocks' _validate_sherrif_id.
+
+    Uses the /push/{id}/get_prompts_status/ polling endpoint instead of
+    the broken /challenge/{id}/respond/ POST, and never calls input().
+    """
+    user_machine_url = "https://api.robinhood.com/pathfinder/user_machine/"
+    payload = {
+        "device_id": device_token,
+        "flow": "suv",
+        "input": {"workflow_id": workflow_id},
+    }
+    data = request_post(url=user_machine_url, payload=payload, json=True)
+
+    if "id" not in data:
+        raise Exception(f"Verification workflow failed — no inquiry ID: {data}")
+
+    inquiries_url = f"https://api.robinhood.com/pathfinder/inquiries/{data['id']}/user_view/"
+    res = request_get(inquiries_url)
+
+    # API changed key from type_context.context → context
+    ctx = res.get("context") or res.get("type_context", {}).get("context", {})
+    challenge_id = ctx.get("sheriff_challenge", {}).get("id") if isinstance(ctx, dict) else None
+    if not challenge_id:
+        raise Exception(f"Could not extract sheriff challenge ID from inquiry: {res}")
+
+    # If TOTP mfa_code is available, try direct challenge response first
+    if mfa_code:
+        challenge_url = f"https://api.robinhood.com/challenge/{challenge_id}/respond/"
+        resp = request_post(url=challenge_url, payload={"response": mfa_code}, json=True)
+        if resp.get("status") == "validated":
+            inq_resp = request_post(
+                url=inquiries_url,
+                payload={"sequence": 0, "user_input": {"status": "continue"}},
+                json=True,
+            )
+            result = inq_resp.get("type_context", {}).get("result", "")
+            if result == "workflow_status_approved":
+                return
+            raise Exception(f"TOTP validated but workflow not approved: {result}")
+
+    # Poll for mobile app approval
+    prompts_url = f"https://api.robinhood.com/push/{challenge_id}/get_prompts_status/"
+    print(
+        "\n[robinhood-mcp] Verification required — open the Robinhood app and approve the login.\n"
+        "[robinhood-mcp] Waiting up to 2 minutes...",
+        file=sys.stderr,
+    )
+
+    start = time.time()
+    while time.time() - start < 120:
+        time.sleep(5)
+        status_res = request_get(url=prompts_url)
+        if status_res.get("challenge_status") == "validated":
+            inq_resp = request_post(
+                url=inquiries_url,
+                payload={"sequence": 0, "user_input": {"status": "continue"}},
+                json=True,
+            )
+            result = inq_resp.get("type_context", {}).get("result", "")
+            if result == "workflow_status_approved":
+                print("[robinhood-mcp] Login approved!", file=sys.stderr)
+                return
+            raise Exception(f"Challenge validated but workflow not approved: {result}")
+        elapsed = int(time.time() - start)
+        print(f"[robinhood-mcp] Waiting for approval... ({elapsed}s)", file=sys.stderr)
+
+    raise Exception("Login timed out after 2 minutes. Restart server and approve in app.")
+
+
+# Apply the monkey-patch before any login calls
+rh_auth._validate_sherrif_id = _patched_validate_sherrif_id
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def get_totp_code(secret: str | None) -> str | None:
     """Generate TOTP code from a base32 authenticator-app secret."""
@@ -34,64 +127,15 @@ def get_totp_code(secret: str | None) -> str | None:
         raise AuthenticationError(f"Failed to generate TOTP code: {e}") from e
 
 
-def _validate_sheriff_workflow(device_token: str, workflow_id: str, mfa_code: str | None = None) -> None:
-    """Handle Robinhood's verification_workflow device-approval challenge.
-
-    Sends a push notification to the Robinhood app and polls until the user
-    approves the login (up to 2 minutes). Falls back to TOTP if provided.
-    """
-    user_machine_url = "https://api.robinhood.com/pathfinder/user_machine/"
-    payload = {
-        "device_id": device_token,
-        "flow": "suv",
-        "input": {"workflow_id": workflow_id},
-    }
-    data = request_post(url=user_machine_url, payload=payload, json=True)
-
-    if "id" not in data:
-        raise AuthenticationError(f"Verification workflow failed: no inquiry ID in response: {data}")
-
-    inquiries_url = f"https://api.robinhood.com/pathfinder/inquiries/{data['id']}/user_view/"
-    res = request_get(inquiries_url)
-
-    challenge_id = res.get("context", {}).get("sheriff_challenge", {}).get("id")
-    if not challenge_id:
-        raise AuthenticationError(f"Could not extract sheriff challenge ID from: {res}")
-
-    # If TOTP is available, try it directly first
-    if mfa_code:
-        challenge_url = f"https://api.robinhood.com/challenge/{challenge_id}/respond/"
-        challenge_response = request_post(url=challenge_url, payload={"response": mfa_code}, json=True)
-        if challenge_response.get("status") == "validated":
-            inquiries_payload = {"sequence": 0, "user_input": {"status": "continue"}}
-            inquiries_response = request_post(url=inquiries_url, payload=inquiries_payload, json=True)
-            if inquiries_response.get("type_context", {}).get("result") == "workflow_status_approved":
-                return
-            raise AuthenticationError("TOTP challenge validated but workflow not approved")
-
-    # No TOTP — poll for mobile app approval
-    prompts_url = f"https://api.robinhood.com/push/{challenge_id}/get_prompts_status/"
-    print(
-        "\n[robinhood-mcp] Verification required — open the Robinhood app and approve the login prompt.\n"
-        "[robinhood-mcp] Waiting up to 2 minutes...",
-        file=sys.stderr,
-    )
-
-    start = time.time()
-    while time.time() - start < 120:
-        time.sleep(5)
-        status_res = request_get(url=prompts_url)
-        if status_res.get("challenge_status") == "validated":
-            inquiries_payload = {"sequence": 0, "user_input": {"status": "continue"}}
-            inquiries_response = request_post(url=inquiries_url, payload=inquiries_payload, json=True)
-            if inquiries_response.get("type_context", {}).get("result") == "workflow_status_approved":
-                print("[robinhood-mcp] Login approved!", file=sys.stderr)
-                return
-            raise AuthenticationError("Challenge validated but workflow not approved")
-        elapsed = int(time.time() - start)
-        print(f"[robinhood-mcp] Waiting for approval... ({elapsed}s)", file=sys.stderr)
-
-    raise AuthenticationError("Login confirmation timed out after 2 minutes. Please restart and approve in app.")
+def _clear_stale_pickle() -> None:
+    """Remove cached session pickle so a fresh login is forced."""
+    pickle_path = os.path.join(os.path.expanduser("~"), ".tokens", "robinhood.pickle")
+    if os.path.isfile(pickle_path):
+        try:
+            os.remove(pickle_path)
+            print(f"[robinhood-mcp] Cleared stale session cache: {pickle_path}", file=sys.stderr)
+        except OSError:
+            pass
 
 
 def login(
@@ -136,29 +180,13 @@ def login(
         if not result:
             raise AuthenticationError("Login returned empty result")
 
-        # If the base login returned a verification_workflow, handle it here
-        if isinstance(result, dict) and "verification_workflow" in result:
-            workflow_id = result["verification_workflow"]["id"]
-            import random
-            device_token = "".join(
-                [f"{(int(random.random() * 4294967296) >> ((3 & i) << 3)) & 255:02x}" for i in range(16)]
-            )
-            _validate_sheriff_workflow(device_token=device_token, workflow_id=workflow_id, mfa_code=mfa_code)
-            # Re-login after approval to get actual access token
-            result = rh.login(
-                username=username,
-                password=password,
-                mfa_code=mfa_code,
-                store_session=True,
-            )
-            if not result or "access_token" not in str(result):
-                raise AuthenticationError("Re-login after approval did not return access token")
-
         return result
 
     except AuthenticationError:
         raise
     except Exception as e:
+        # If login failed, clear pickle so next attempt starts clean
+        _clear_stale_pickle()
         raise AuthenticationError(f"Login failed: {e}") from e
 
 
