@@ -41,23 +41,23 @@ _login_error: str | None = None
 
 
 def _ensure_logged_in() -> None:
-    """Ensure we're logged in before API calls."""
+    """Ensure we're logged in before API calls, re-attempting if session expired."""
     global _login_attempted, _login_error
 
-    if not _login_attempted:
-        _login_attempted = True
-        try:
-            login()
-            print("Logged in to Robinhood", file=sys.stderr)
-        except AuthenticationError as e:
-            _login_error = str(e)
-            print(f"Login failed: {e}", file=sys.stderr)
-
+    # Permanent credential failure — no point retrying
     if _login_error:
         raise RobinhoodError(f"Not logged in: {_login_error}")
 
-    if not is_logged_in():
-        raise RobinhoodError("Session expired. Please restart the server.")
+    if not _login_attempted or not is_logged_in():
+        _login_attempted = True
+        _login_error = None
+        try:
+            login()
+            print("[robinhood-mcp] Logged in to Robinhood", file=sys.stderr)
+        except AuthenticationError as e:
+            _login_error = str(e)
+            print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
+            raise RobinhoodError(f"Not logged in: {_login_error}") from e
 
 
 @mcp.tool()
