@@ -1,5 +1,6 @@
 """Read-only Robinhood tools wrapping robin_stocks library."""
 
+from collections.abc import Callable
 from typing import Any, Literal
 
 import robin_stocks.robinhood as rh
@@ -11,7 +12,7 @@ class RobinhoodError(Exception):
     pass
 
 
-def _safe_call(func: callable, *args, **kwargs) -> Any:
+def _safe_call(func: Callable[..., Any], *args, **kwargs) -> Any:
     """Safely call a robin_stocks function with error handling.
 
     Args:
