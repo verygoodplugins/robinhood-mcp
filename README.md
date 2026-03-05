@@ -1,6 +1,8 @@
 <!-- mcp-name: io.github.verygoodplugins/robinhood-mcp -->
+
 # robinhood-mcp
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/verygoodplugins/robinhood-mcp)
 [![PyPI version](https://badge.fury.io/py/robinhood-mcp.svg)](https://badge.fury.io/py/robinhood-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
