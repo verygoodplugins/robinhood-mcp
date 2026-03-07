@@ -105,15 +105,25 @@ def get_positions() -> dict[str, dict[str, Any]]:
         - price, quantity, average_buy_price
         - equity, percent_change, equity_change
     """
+    global _positions_cache, _positions_cache_ts
+
     now = time.monotonic()
     cached = _get_positions_cached(now)
     if cached is not None:
         return cached
 
-    result = _safe_call(rh.account.build_holdings)
-    if isinstance(result, dict) and result:
-        _set_positions_cache(result, now)
-    return result
+    with _positions_cache_lock:
+        now = time.monotonic()
+        if _positions_cache is not None and (
+            now - _positions_cache_ts
+        ) < _POSITIONS_CACHE_TTL_SECONDS:
+            return deepcopy(_positions_cache)
+
+        result = _safe_call(rh.account.build_holdings)
+        if isinstance(result, dict):
+            _positions_cache = deepcopy(result)
+            _positions_cache_ts = time.monotonic()
+        return result
 
 
 def get_position(symbol: str) -> dict[str, Any]:

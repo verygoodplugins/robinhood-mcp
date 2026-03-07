@@ -74,7 +74,10 @@ class TestGetPositions:
 
         assert result == expected
 
-    @patch("robinhood_mcp.tools.time.monotonic", side_effect=[100.0, 101.0])
+    @patch(
+        "robinhood_mcp.tools.time.monotonic",
+        side_effect=[100.0, 100.0, 100.0, 101.0],
+    )
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
     def test_caches_holdings_snapshot(
         self, mock_holdings: MagicMock, mock_monotonic: MagicMock
@@ -92,9 +95,12 @@ class TestGetPositions:
             "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
         }
         assert mock_holdings.call_count == 1
-        assert mock_monotonic.call_count == 2
+        assert mock_monotonic.call_count == 4
 
-    @patch("robinhood_mcp.tools.time.monotonic", side_effect=[100.0, 131.0])
+    @patch(
+        "robinhood_mcp.tools.time.monotonic",
+        side_effect=[100.0, 100.0, 100.0, 131.0, 131.0, 131.0],
+    )
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
     def test_refreshes_expired_cache(
         self, mock_holdings: MagicMock, mock_monotonic: MagicMock
@@ -111,13 +117,16 @@ class TestGetPositions:
         assert first == {"AAPL": {"quantity": "10"}}
         assert second == {"AAPL": {"quantity": "11"}}
         assert mock_holdings.call_count == 2
-        assert mock_monotonic.call_count == 2
+        assert mock_monotonic.call_count == 6
 
 
 class TestGetPosition:
     """Tests for get_position function."""
 
-    @patch("robinhood_mcp.tools.time.monotonic", side_effect=[100.0, 101.0])
+    @patch(
+        "robinhood_mcp.tools.time.monotonic",
+        side_effect=[100.0, 100.0, 100.0, 101.0],
+    )
     @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
     def test_returns_cached_symbol_without_extra_api_calls(
@@ -146,7 +155,7 @@ class TestGetPosition:
             "equity": "555.00",
         }
         mock_get_instruments.assert_not_called()
-        assert mock_monotonic.call_count == 2
+        assert mock_monotonic.call_count == 4
 
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
     @patch("robinhood_mcp.tools.get_quote")
