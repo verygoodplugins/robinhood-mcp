@@ -146,9 +146,12 @@ class TestGetPosition:
         assert result == {
             "symbol": "HIMS",
             "held": True,
+            "price": None,
             "quantity": "25",
             "average_buy_price": "18.50",
             "equity": "555.00",
+            "percent_change": None,
+            "equity_change": None,
         }
         mock_get_instruments.assert_not_called()
         assert mock_monotonic.call_count == 4
@@ -186,7 +189,6 @@ class TestGetPosition:
             "equity": "215.00",
             "percent_change": "7.50",
             "equity_change": "15.00",
-            "instrument": "https://instrument/hims/",
         }
         mock_get_instruments.assert_called_once_with("HIMS")
         mock_open_positions.assert_called_once_with()

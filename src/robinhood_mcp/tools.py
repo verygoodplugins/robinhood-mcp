@@ -127,6 +127,25 @@ def get_positions() -> dict[str, dict[str, Any]]:
         return result
 
 
+_POSITION_FIELDS = (
+    "price",
+    "quantity",
+    "average_buy_price",
+    "equity",
+    "percent_change",
+    "equity_change",
+)
+
+
+def _position_payload(symbol: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Build a stable position response with a fixed set of fields."""
+    return {
+        "symbol": symbol,
+        "held": True,
+        **{k: data.get(k) for k in _POSITION_FIELDS},
+    }
+
+
 def get_position(symbol: str) -> dict[str, Any]:
     """Get a single position by symbol without rebuilding all holdings.
 
@@ -139,7 +158,7 @@ def get_position(symbol: str) -> dict[str, Any]:
     if cached_positions is not None:
         cached_position = cached_positions.get(symbol)
         if isinstance(cached_position, dict):
-            return {"symbol": symbol, "held": True, **cached_position}
+            return _position_payload(symbol, cached_position)
         return {"symbol": symbol, "held": False}
 
     instruments = _safe_call(rh.stocks.get_instruments_by_symbols, symbol)
@@ -186,17 +205,17 @@ def get_position(symbol: str) -> dict[str, Any]:
         if average_buy_price_f == 0.0
         else ((price_f - average_buy_price_f) * 100 / average_buy_price_f)
     )
-    return {
-        "symbol": symbol,
-        "held": True,
-        "price": f"{price_f:.2f}",
-        "quantity": quantity,
-        "average_buy_price": average_buy_price,
-        "equity": f"{equity:.2f}",
-        "percent_change": f"{percent_change:.2f}",
-        "equity_change": f"{equity_change:.2f}",
-        "instrument": instrument_url,
-    }
+    return _position_payload(
+        symbol,
+        {
+            "price": f"{price_f:.2f}",
+            "quantity": quantity,
+            "average_buy_price": average_buy_price,
+            "equity": f"{equity:.2f}",
+            "percent_change": f"{percent_change:.2f}",
+            "equity_change": f"{equity_change:.2f}",
+        },
+    )
 
 
 def get_watchlist(name: str = "Default") -> list[dict[str, Any]]:
