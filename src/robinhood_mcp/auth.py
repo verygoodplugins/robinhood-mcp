@@ -15,10 +15,12 @@ sends a push notification and waits for mobile app approval.
 """
 
 import inspect
+import io
 import logging
 import os
 import sys
 import time
+from contextlib import redirect_stdout
 from typing import Any
 
 import pyotp
@@ -48,6 +50,25 @@ class EnvironmentVariablesError(AuthenticationError):
 # ---------------------------------------------------------------------------
 
 
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    """Normalize optional Robinhood payload fragments to dictionaries."""
+    return value if isinstance(value, dict) else {}
+
+
+def _request_workflow_result(inquiries_url: str) -> str | None:
+    """Ask Robinhood whether an approved challenge has finalized the workflow."""
+    inq_resp = request_post(
+        url=inquiries_url,
+        payload={"sequence": 0, "user_input": {"status": "continue"}},
+        json=True,
+    )
+    if not isinstance(inq_resp, dict):
+        return None
+    context = _dict_or_empty(inq_resp.get("context"))
+    type_context = _dict_or_empty(inq_resp.get("type_context"))
+    return context.get("result") or type_context.get("result", "")
+
+
 def _patched_validate_sherrif_id(
     device_token: str, workflow_id: str, mfa_code: str | None = None
 ) -> None:
@@ -64,15 +85,19 @@ def _patched_validate_sherrif_id(
     }
     data = request_post(url=user_machine_url, payload=payload, json=True)
 
-    if "id" not in data:
+    if not isinstance(data, dict) or "id" not in data:
         raise AuthenticationError("Verification workflow failed — missing inquiry ID")
 
     inquiries_url = f"https://api.robinhood.com/pathfinder/inquiries/{data['id']}/user_view/"
     res = request_get(inquiries_url)
+    if not isinstance(res, dict):
+        raise AuthenticationError("Verification workflow failed — missing inquiry details")
 
     # API changed key from type_context.context → context
-    ctx = res.get("context") or res.get("type_context", {}).get("context", {})
-    challenge_id = ctx.get("sheriff_challenge", {}).get("id") if isinstance(ctx, dict) else None
+    ctx = _dict_or_empty(res.get("context"))
+    if not ctx:
+        ctx = _dict_or_empty(_dict_or_empty(res.get("type_context")).get("context"))
+    challenge_id = _dict_or_empty(ctx.get("sheriff_challenge")).get("id")
     if not challenge_id:
         inquiry_id = data.get("id")
         details = f" for inquiry {inquiry_id}" if inquiry_id else ""
@@ -84,17 +109,14 @@ def _patched_validate_sherrif_id(
     if mfa_code:
         challenge_url = f"https://api.robinhood.com/challenge/{challenge_id}/respond/"
         resp = request_post(url=challenge_url, payload={"response": mfa_code}, json=True)
+        if not isinstance(resp, dict):
+            raise AuthenticationError("TOTP challenge response was empty")
         if resp.get("status") == "validated":
-            inq_resp = request_post(
-                url=inquiries_url,
-                payload={"sequence": 0, "user_input": {"status": "continue"}},
-                json=True,
-            )
-            result = inq_resp.get("context", {}).get("result") or inq_resp.get(
-                "type_context", {}
-            ).get("result", "")
+            result = _request_workflow_result(inquiries_url)
             if result == "workflow_status_approved":
                 return
+            if not result:
+                raise AuthenticationError("TOTP validated but workflow result was empty")
             raise AuthenticationError(f"TOTP validated but workflow not approved: {result}")
 
     # Poll for mobile app approval
@@ -109,20 +131,26 @@ def _patched_validate_sherrif_id(
     while time.time() - start < 120:
         time.sleep(5)
         status_res = request_get(url=prompts_url)
-        if status_res.get("challenge_status") == "validated":
-            inq_resp = request_post(
-                url=inquiries_url,
-                payload={"sequence": 0, "user_input": {"status": "continue"}},
-                json=True,
+        elapsed = int(time.time() - start)
+        if not isinstance(status_res, dict):
+            print(
+                f"[robinhood-mcp] Approval status unavailable, retrying... ({elapsed}s)",
+                file=sys.stderr,
             )
-            result = inq_resp.get("context", {}).get("result") or inq_resp.get(
-                "type_context", {}
-            ).get("result", "")
+            continue
+        if status_res.get("challenge_status") == "validated":
+            result = _request_workflow_result(inquiries_url)
             if result == "workflow_status_approved":
                 print("[robinhood-mcp] Login approved!", file=sys.stderr)
                 return
+            if not result:
+                print(
+                    "[robinhood-mcp] Approval recorded, waiting for workflow "
+                    f"finalization... ({elapsed}s)",
+                    file=sys.stderr,
+                )
+                continue
             raise AuthenticationError(f"Challenge validated but workflow not approved: {result}")
-        elapsed = int(time.time() - start)
         print(f"[robinhood-mcp] Waiting for approval... ({elapsed}s)", file=sys.stderr)
 
     raise AuthenticationError("Login timed out after 2 minutes. Restart server and approve in app.")
@@ -176,6 +204,31 @@ def _clear_stale_pickle() -> None:
             raise
 
 
+def _emit_captured_login_stdout(output: str) -> None:
+    """Forward robin_stocks stdout chatter to stderr for MCP-safe logging."""
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line:
+            print(f"[robinhood-mcp][robin_stocks] {line}", file=sys.stderr)
+
+
+def _login_with_captured_stdout(
+    *, username: str, password: str, mfa_code: str | None
+) -> dict[str, Any] | None:
+    """Run robin_stocks login without letting stdout corrupt MCP JSON-RPC transport."""
+    stdout_buffer = io.StringIO()
+    try:
+        with redirect_stdout(stdout_buffer):
+            return rh.login(
+                username=username,
+                password=password,
+                mfa_code=mfa_code,
+                store_session=True,
+            )
+    finally:
+        _emit_captured_login_stdout(stdout_buffer.getvalue())
+
+
 def login(
     username: str | None = None,
     password: str | None = None,
@@ -208,14 +261,21 @@ def login(
     mfa_code = get_totp_code(totp_secret)
 
     try:
-        result = rh.login(
+        result = _login_with_captured_stdout(
             username=username,
             password=password,
             mfa_code=mfa_code,
-            store_session=True,
         )
 
         if not result:
+            if is_logged_in():
+                return {
+                    "detail": (
+                        "logged in with active Robinhood session after empty login result"
+                    ),
+                    "recovered_empty_result": True,
+                    "session_valid": True,
+                }
             raise AuthenticationError("Login returned empty result")
 
         return result
