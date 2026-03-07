@@ -112,12 +112,19 @@ def _patched_validate_sherrif_id(
         if not isinstance(resp, dict):
             raise AuthenticationError("TOTP challenge response was empty")
         if resp.get("status") == "validated":
-            result = _request_workflow_result(inquiries_url)
-            if result == "workflow_status_approved":
-                return
-            if not result:
-                raise AuthenticationError("TOTP validated but workflow result was empty")
-            raise AuthenticationError(f"TOTP validated but workflow not approved: {result}")
+            # Retry workflow finalization — the workflow may not be immediately
+            # ready after TOTP validation (same race the push-approval path handles).
+            totp_start = time.time()
+            while time.time() - totp_start < 120:
+                result = _request_workflow_result(inquiries_url)
+                if result == "workflow_status_approved":
+                    return
+                if result:
+                    raise AuthenticationError(f"TOTP validated but workflow not approved: {result}")
+                time.sleep(5)
+            raise AuthenticationError(
+                "TOTP validated but workflow finalization timed out after 2 minutes"
+            )
 
     # Poll for mobile app approval
     prompts_url = f"https://api.robinhood.com/push/{challenge_id}/get_prompts_status/"
@@ -270,9 +277,7 @@ def login(
         if not result:
             if is_logged_in():
                 return {
-                    "detail": (
-                        "logged in with active Robinhood session after empty login result"
-                    ),
+                    "detail": ("logged in with active Robinhood session after empty login result"),
                     "recovered_empty_result": True,
                     "session_valid": True,
                 }
