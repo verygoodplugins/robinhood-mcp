@@ -7,6 +7,7 @@ import pytest
 from robinhood_mcp.auth import (
     AuthenticationError,
     _clear_stale_pickle,
+    _patched_validate_sherrif_id,
     get_totp_code,
     is_logged_in,
     login,
@@ -88,6 +89,84 @@ class TestLogin:
         call_args = mock_login.call_args
         assert call_args.kwargs["mfa_code"] is not None
         assert len(call_args.kwargs["mfa_code"]) == 6
+
+    @patch.dict(
+        "os.environ",
+        {"ROBINHOOD_USERNAME": "test@example.com", "ROBINHOOD_PASSWORD": "secret"},
+        clear=True,
+    )
+    @patch("robinhood_mcp.auth._clear_stale_pickle")
+    @patch("robinhood_mcp.auth.is_logged_in")
+    @patch("robinhood_mcp.auth.rh.login")
+    def test_treats_empty_result_as_success_when_session_is_valid(
+        self,
+        mock_login: MagicMock,
+        mock_is_logged_in: MagicMock,
+        mock_clear_stale_pickle: MagicMock,
+    ):
+        """Should recover when robin_stocks returns no payload but session is valid."""
+        mock_login.return_value = None
+        mock_is_logged_in.return_value = True
+
+        result = login()
+
+        assert result["recovered_empty_result"] is True
+        assert result["session_valid"] is True
+        assert "active Robinhood session" in result["detail"]
+        mock_clear_stale_pickle.assert_not_called()
+
+    @patch.dict(
+        "os.environ",
+        {"ROBINHOOD_USERNAME": "test@example.com", "ROBINHOOD_PASSWORD": "secret"},
+        clear=True,
+    )
+    @patch("robinhood_mcp.auth._clear_stale_pickle")
+    @patch("robinhood_mcp.auth.is_logged_in")
+    @patch("robinhood_mcp.auth.rh.login")
+    def test_raises_on_empty_result_without_valid_session(
+        self,
+        mock_login: MagicMock,
+        mock_is_logged_in: MagicMock,
+        mock_clear_stale_pickle: MagicMock,
+    ):
+        """Should still raise when robin_stocks returns no payload and no session exists."""
+        mock_login.return_value = None
+        mock_is_logged_in.return_value = False
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            login()
+
+        assert "empty result" in str(exc_info.value)
+        mock_clear_stale_pickle.assert_called_once()
+
+    @patch.dict(
+        "os.environ",
+        {"ROBINHOOD_USERNAME": "test@example.com", "ROBINHOOD_PASSWORD": "secret"},
+        clear=True,
+    )
+    @patch("robinhood_mcp.auth.rh.login")
+    def test_redirects_robin_stocks_stdout_to_stderr(
+        self, mock_login: MagicMock, capsys: pytest.CaptureFixture[str]
+    ):
+        """Should keep third-party login chatter off stdout for MCP safety."""
+
+        def fake_login(**_: str) -> dict[str, str]:
+            print("Starting login process...")
+            print("Verification required, handling challenge...")
+            return {"access_token": "test"}
+
+        mock_login.side_effect = fake_login
+
+        result = login()
+        captured = capsys.readouterr()
+
+        assert result == {"access_token": "test"}
+        assert captured.out == ""
+        assert "[robinhood-mcp][robin_stocks] Starting login process..." in captured.err
+        assert (
+            "[robinhood-mcp][robin_stocks] Verification required, handling challenge..."
+            in captured.err
+        )
 
     @patch.dict(
         "os.environ",
@@ -180,6 +259,90 @@ class TestLogout:
 
         # Should not raise
         logout()
+
+
+class TestPatchedValidationWorkflow:
+    """Tests for the patched Robinhood verification workflow."""
+
+    @patch("robinhood_mcp.auth.time.sleep", return_value=None)
+    @patch("robinhood_mcp.auth.time.time", side_effect=range(0, 500, 5))
+    @patch("robinhood_mcp.auth.request_get")
+    @patch("robinhood_mcp.auth.request_post")
+    def test_retries_when_prompt_status_response_is_empty(
+        self,
+        mock_request_post: MagicMock,
+        mock_request_get: MagicMock,
+        _mock_time: MagicMock,
+        _mock_sleep: MagicMock,
+    ):
+        """Should keep polling when prompt status endpoint briefly returns None."""
+        mock_request_post.side_effect = [
+            {"id": "inq-123"},
+            {"context": {"result": "workflow_status_approved"}},
+        ]
+        mock_request_get.side_effect = [
+            {"context": {"sheriff_challenge": {"id": "challenge-123"}}},
+            None,
+            {"challenge_status": "validated"},
+        ]
+
+        _patched_validate_sherrif_id("device-token", "workflow-id")
+
+        assert mock_request_get.call_count == 3
+
+    @patch("robinhood_mcp.auth.time.sleep", return_value=None)
+    @patch("robinhood_mcp.auth.time.time", side_effect=range(0, 500, 5))
+    @patch("robinhood_mcp.auth.request_get")
+    @patch("robinhood_mcp.auth.request_post")
+    def test_retries_when_workflow_result_is_empty_after_approval(
+        self,
+        mock_request_post: MagicMock,
+        mock_request_get: MagicMock,
+        _mock_time: MagicMock,
+        _mock_sleep: MagicMock,
+    ):
+        """Should keep polling when approval is recorded before workflow result is ready."""
+        mock_request_post.side_effect = [
+            {"id": "inq-123"},
+            None,
+            {"context": {"result": "workflow_status_approved"}},
+        ]
+        mock_request_get.side_effect = [
+            {"context": {"sheriff_challenge": {"id": "challenge-123"}}},
+            {"challenge_status": "validated"},
+            {"challenge_status": "validated"},
+        ]
+
+        _patched_validate_sherrif_id("device-token", "workflow-id")
+
+        assert mock_request_post.call_count == 3
+
+    @patch("robinhood_mcp.auth.time.sleep", return_value=None)
+    @patch("robinhood_mcp.auth.time.time", side_effect=range(0, 500, 5))
+    @patch("robinhood_mcp.auth.request_get")
+    @patch("robinhood_mcp.auth.request_post")
+    def test_retries_when_workflow_context_is_null_after_approval(
+        self,
+        mock_request_post: MagicMock,
+        mock_request_get: MagicMock,
+        _mock_time: MagicMock,
+        _mock_sleep: MagicMock,
+    ):
+        """Should tolerate Robinhood returning {'context': None} before finalization."""
+        mock_request_post.side_effect = [
+            {"id": "inq-123"},
+            {"context": None, "type_context": None},
+            {"context": {"result": "workflow_status_approved"}},
+        ]
+        mock_request_get.side_effect = [
+            {"context": {"sheriff_challenge": {"id": "challenge-123"}}},
+            {"challenge_status": "validated"},
+            {"challenge_status": "validated"},
+        ]
+
+        _patched_validate_sherrif_id("device-token", "workflow-id")
+
+        assert mock_request_post.call_count == 3
 
 
 class TestIsLoggedIn:
