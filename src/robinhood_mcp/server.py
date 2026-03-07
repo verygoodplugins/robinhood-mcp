@@ -18,6 +18,7 @@ from .tools import (
     get_news,
     get_options_positions,
     get_portfolio,
+    get_position,
     get_positions,
     get_quote,
     get_ratings,
@@ -115,6 +116,20 @@ def robinhood_get_positions() -> dict:
     """
     _ensure_logged_in()
     return get_positions()
+
+
+@mcp.tool()
+def robinhood_get_position(symbol: str) -> dict:
+    """Get one current stock position with a faster single-symbol lookup.
+
+    Args:
+        symbol: Stock ticker symbol (e.g., "HIMS", "AAPL")
+
+    Returns a dict with held=False if absent, otherwise the position details
+    for that symbol including quantity, price, average buy price, and P&L.
+    """
+    _ensure_logged_in()
+    return get_position(symbol)
 
 
 @mcp.tool()

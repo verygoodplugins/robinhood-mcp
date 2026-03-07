@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import robinhood_mcp.tools as tools_module
 from robinhood_mcp.tools import (
     RobinhoodError,
     get_dividends,
@@ -13,12 +14,21 @@ from robinhood_mcp.tools import (
     get_news,
     get_options_positions,
     get_portfolio,
+    get_position,
     get_positions,
     get_quote,
     get_ratings,
     get_watchlist,
     search_symbols,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_positions_cache():
+    """Reset the positions cache between tests."""
+    tools_module._clear_positions_cache()
+    yield
+    tools_module._clear_positions_cache()
 
 
 class TestGetPortfolio:
@@ -63,6 +73,140 @@ class TestGetPositions:
         result = get_positions()
 
         assert result == expected
+
+    @patch("robinhood_mcp.tools.time.monotonic", side_effect=[100.0, 101.0])
+    @patch("robinhood_mcp.tools.rh.account.build_holdings")
+    def test_caches_holdings_snapshot(
+        self, mock_holdings: MagicMock, mock_monotonic: MagicMock
+    ):
+        """Should reuse a fresh holdings snapshot instead of rebuilding it."""
+        mock_holdings.return_value = {
+            "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
+        }
+
+        first = get_positions()
+        first["AAPL"]["quantity"] = "999"
+        second = get_positions()
+
+        assert second == {
+            "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
+        }
+        assert mock_holdings.call_count == 1
+        assert mock_monotonic.call_count == 2
+
+    @patch("robinhood_mcp.tools.time.monotonic", side_effect=[100.0, 131.0])
+    @patch("robinhood_mcp.tools.rh.account.build_holdings")
+    def test_refreshes_expired_cache(
+        self, mock_holdings: MagicMock, mock_monotonic: MagicMock
+    ):
+        """Should rebuild holdings after the cache TTL expires."""
+        mock_holdings.side_effect = [
+            {"AAPL": {"quantity": "10"}},
+            {"AAPL": {"quantity": "11"}},
+        ]
+
+        first = get_positions()
+        second = get_positions()
+
+        assert first == {"AAPL": {"quantity": "10"}}
+        assert second == {"AAPL": {"quantity": "11"}}
+        assert mock_holdings.call_count == 2
+        assert mock_monotonic.call_count == 2
+
+
+class TestGetPosition:
+    """Tests for get_position function."""
+
+    @patch("robinhood_mcp.tools.time.monotonic", side_effect=[100.0, 101.0])
+    @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
+    @patch("robinhood_mcp.tools.rh.account.build_holdings")
+    def test_returns_cached_symbol_without_extra_api_calls(
+        self,
+        mock_holdings: MagicMock,
+        mock_get_instruments: MagicMock,
+        mock_monotonic: MagicMock,
+    ):
+        """Should serve a cached symbol directly from the holdings snapshot."""
+        mock_holdings.return_value = {
+            "HIMS": {
+                "quantity": "25",
+                "average_buy_price": "18.50",
+                "equity": "555.00",
+            },
+        }
+
+        get_positions()
+        result = get_position(" hims ")
+
+        assert result == {
+            "symbol": "HIMS",
+            "held": True,
+            "quantity": "25",
+            "average_buy_price": "18.50",
+            "equity": "555.00",
+        }
+        mock_get_instruments.assert_not_called()
+        assert mock_monotonic.call_count == 2
+
+    @patch("robinhood_mcp.tools.rh.account.build_holdings")
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
+    def test_returns_single_position_without_building_all_holdings(
+        self,
+        mock_get_instruments: MagicMock,
+        mock_open_positions: MagicMock,
+        mock_get_quote: MagicMock,
+        mock_build_holdings: MagicMock,
+    ):
+        """Should fetch one symbol directly when holdings cache is cold."""
+        mock_get_instruments.return_value = [{"url": "https://instrument/hims/"}]
+        mock_open_positions.return_value = [
+            {
+                "instrument": "https://instrument/hims/",
+                "quantity": "10.00000000",
+                "average_buy_price": "20.00",
+            }
+        ]
+        mock_get_quote.return_value = {"last_trade_price": "21.50"}
+
+        result = get_position("HIMS")
+
+        assert result == {
+            "symbol": "HIMS",
+            "held": True,
+            "price": "21.50",
+            "quantity": "10.00000000",
+            "average_buy_price": "20.00",
+            "equity": "215.00",
+            "percent_change": "7.50",
+            "equity_change": "15.00",
+            "instrument": "https://instrument/hims/",
+        }
+        mock_get_instruments.assert_called_once_with("HIMS")
+        mock_open_positions.assert_called_once_with()
+        mock_get_quote.assert_called_once_with("HIMS")
+        mock_build_holdings.assert_not_called()
+
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
+    def test_returns_not_held_when_symbol_absent(
+        self,
+        mock_get_instruments: MagicMock,
+        mock_open_positions: MagicMock,
+        mock_get_quote: MagicMock,
+    ):
+        """Should report held=False when the symbol has no open position."""
+        mock_get_instruments.return_value = [{"url": "https://instrument/hims/"}]
+        mock_open_positions.return_value = [
+            {"instrument": "https://instrument/other/", "quantity": "1"}
+        ]
+
+        result = get_position("HIMS")
+
+        assert result == {"symbol": "HIMS", "held": False}
+        mock_get_quote.assert_not_called()
 
 
 class TestGetQuote:
