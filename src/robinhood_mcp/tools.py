@@ -114,9 +114,10 @@ def get_positions() -> dict[str, dict[str, Any]]:
 
     with _positions_cache_lock:
         now = time.monotonic()
-        if _positions_cache is not None and (
-            now - _positions_cache_ts
-        ) < _POSITIONS_CACHE_TTL_SECONDS:
+        if (
+            _positions_cache is not None
+            and (now - _positions_cache_ts) < _POSITIONS_CACHE_TTL_SECONDS
+        ):
             return deepcopy(_positions_cache)
 
         result = _safe_call(rh.account.build_holdings)

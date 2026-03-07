@@ -79,9 +79,7 @@ class TestGetPositions:
         side_effect=[100.0, 100.0, 100.0, 101.0],
     )
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
-    def test_caches_holdings_snapshot(
-        self, mock_holdings: MagicMock, mock_monotonic: MagicMock
-    ):
+    def test_caches_holdings_snapshot(self, mock_holdings: MagicMock, mock_monotonic: MagicMock):
         """Should reuse a fresh holdings snapshot instead of rebuilding it."""
         mock_holdings.return_value = {
             "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
@@ -102,9 +100,7 @@ class TestGetPositions:
         side_effect=[100.0, 100.0, 100.0, 131.0, 131.0, 131.0],
     )
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
-    def test_refreshes_expired_cache(
-        self, mock_holdings: MagicMock, mock_monotonic: MagicMock
-    ):
+    def test_refreshes_expired_cache(self, mock_holdings: MagicMock, mock_monotonic: MagicMock):
         """Should rebuild holdings after the cache TTL expires."""
         mock_holdings.side_effect = [
             {"AAPL": {"quantity": "10"}},
