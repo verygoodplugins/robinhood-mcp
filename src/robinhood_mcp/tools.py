@@ -162,12 +162,14 @@ def get_position(symbol: str) -> dict[str, Any]:
         return {"symbol": symbol, "held": False}
 
     instruments = _safe_call(rh.stocks.get_instruments_by_symbols, symbol)
-    if not isinstance(instruments, list) or not instruments or not isinstance(instruments[0], dict):
-        return {"symbol": symbol, "held": False}
-
-    instrument_url = instruments[0].get("url")
-    if not instrument_url:
+    if (
+        not isinstance(instruments, list)
+        or not instruments
+        or not isinstance(instruments[0], dict)
+        or not instruments[0].get("url")
+    ):
         raise RobinhoodError(f"No instrument found for symbol: {symbol}")
+    instrument_url = instruments[0]["url"]
 
     positions = _safe_call(rh.account.get_open_stock_positions)
     if not isinstance(positions, list):
