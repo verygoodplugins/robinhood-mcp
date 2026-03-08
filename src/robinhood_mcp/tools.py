@@ -146,6 +146,19 @@ def _position_payload(symbol: str, data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_symbol_instrument(symbol: str) -> str:
+    """Resolve a symbol to its instrument URL, raising on unknown tickers."""
+    instruments = _safe_call(rh.stocks.get_instruments_by_symbols, symbol)
+    if (
+        not isinstance(instruments, list)
+        or not instruments
+        or not isinstance(instruments[0], dict)
+        or not instruments[0].get("url")
+    ):
+        raise RobinhoodError(f"No instrument found for symbol: {symbol}")
+    return instruments[0]["url"]
+
+
 def get_position(symbol: str) -> dict[str, Any]:
     """Get a single position by symbol without rebuilding all holdings.
 
@@ -159,17 +172,10 @@ def get_position(symbol: str) -> dict[str, Any]:
         cached_position = cached_positions.get(symbol)
         if isinstance(cached_position, dict):
             return _position_payload(symbol, cached_position)
+        _validate_symbol_instrument(symbol)
         return {"symbol": symbol, "held": False}
 
-    instruments = _safe_call(rh.stocks.get_instruments_by_symbols, symbol)
-    if (
-        not isinstance(instruments, list)
-        or not instruments
-        or not isinstance(instruments[0], dict)
-        or not instruments[0].get("url")
-    ):
-        raise RobinhoodError(f"No instrument found for symbol: {symbol}")
-    instrument_url = instruments[0]["url"]
+    instrument_url = _validate_symbol_instrument(symbol)
 
     positions = _safe_call(rh.account.get_open_stock_positions)
     if not isinstance(positions, list):
