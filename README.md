@@ -121,6 +121,7 @@ claude mcp add robinhood -- uvx robinhood-mcp
 | --------------------------------- | ---------------------------------------------------- |
 | `robinhood_get_portfolio`         | Portfolio value, equity, buying power, day change    |
 | `robinhood_get_positions`         | All holdings with cost basis, current value, P&L     |
+| `robinhood_get_position`          | One holding by ticker with quantity, value, and P&L  |
 | `robinhood_get_watchlist`         | Stocks in your watchlists                            |
 | `robinhood_get_quote`             | Real-time price, bid/ask, volume                     |
 | `robinhood_get_fundamentals`      | P/E ratio, market cap, dividend yield, 52-week range |
@@ -138,7 +139,12 @@ claude mcp add robinhood -- uvx robinhood-mcp
 
 - "What's my portfolio worth right now?"
 - "Show me my top 5 holdings by value"
+- "Do I already own HIMS, and what's my current position?"
 - "Get me a quote for AAPL"
+
+For single-symbol portfolio questions, prefer `robinhood_get_position` over
+`robinhood_get_positions`. The single-symbol tool avoids rebuilding every
+holding and is much faster for questions like "Should I add more HIMS?"
 
 **Analysis requests:**
 

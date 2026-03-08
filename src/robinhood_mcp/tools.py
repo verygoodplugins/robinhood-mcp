@@ -1,6 +1,9 @@
 """Read-only Robinhood tools wrapping robin_stocks library."""
 
+import threading
+import time
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any, Literal
 
 import robin_stocks.robinhood as rh
@@ -10,6 +13,12 @@ class RobinhoodError(Exception):
     """Error from Robinhood API call."""
 
     pass
+
+
+_POSITIONS_CACHE_TTL_SECONDS = 30.0
+_positions_cache_lock = threading.Lock()
+_positions_cache: dict[str, dict[str, Any]] | None = None
+_positions_cache_ts = 0.0
 
 
 def _safe_call(func: Callable[..., Any], *args, **kwargs) -> Any:
@@ -37,6 +46,48 @@ def _safe_call(func: Callable[..., Any], *args, **kwargs) -> Any:
         raise RobinhoodError(f"API call failed: {e}") from e
 
 
+def _normalize_symbol(symbol: str) -> str:
+    """Normalize and validate ticker symbols."""
+    if not symbol or not isinstance(symbol, str):
+        raise RobinhoodError("Symbol must be a non-empty string")
+    symbol = symbol.upper().strip()
+    if not symbol:
+        raise RobinhoodError("Symbol must be a non-empty string")
+    return symbol
+
+
+def _clear_positions_cache() -> None:
+    """Reset the cached holdings snapshot."""
+    global _positions_cache, _positions_cache_ts
+
+    with _positions_cache_lock:
+        _positions_cache = None
+        _positions_cache_ts = 0.0
+
+
+def _get_positions_cached(now: float) -> dict[str, dict[str, Any]] | None:
+    """Return cached holdings when still fresh."""
+    global _positions_cache, _positions_cache_ts
+
+    with _positions_cache_lock:
+        if _positions_cache is None:
+            return None
+        if (now - _positions_cache_ts) >= _POSITIONS_CACHE_TTL_SECONDS:
+            _positions_cache = None
+            _positions_cache_ts = 0.0
+            return None
+        return deepcopy(_positions_cache)
+
+
+def _set_positions_cache(positions: dict[str, dict[str, Any]], now: float) -> None:
+    """Store a fresh holdings snapshot for subsequent reads."""
+    global _positions_cache, _positions_cache_ts
+
+    with _positions_cache_lock:
+        _positions_cache = deepcopy(positions)
+        _positions_cache_ts = now
+
+
 def get_portfolio() -> dict[str, Any]:
     """Get current portfolio value and performance metrics.
 
@@ -54,7 +105,126 @@ def get_positions() -> dict[str, dict[str, Any]]:
         - price, quantity, average_buy_price
         - equity, percent_change, equity_change
     """
-    return _safe_call(rh.account.build_holdings)
+    global _positions_cache, _positions_cache_ts
+
+    now = time.monotonic()
+    cached = _get_positions_cached(now)
+    if cached is not None:
+        return cached
+
+    with _positions_cache_lock:
+        now = time.monotonic()
+        if (
+            _positions_cache is not None
+            and (now - _positions_cache_ts) < _POSITIONS_CACHE_TTL_SECONDS
+        ):
+            return deepcopy(_positions_cache)
+
+        result = _safe_call(rh.account.build_holdings)
+        if not isinstance(result, dict):
+            raise RobinhoodError(
+                f"Unexpected build_holdings response type: {type(result).__name__}"
+            )
+        _positions_cache = deepcopy(result)
+        _positions_cache_ts = time.monotonic()
+        return result
+
+
+_POSITION_FIELDS = (
+    "price",
+    "quantity",
+    "average_buy_price",
+    "equity",
+    "percent_change",
+    "equity_change",
+)
+
+
+def _position_payload(symbol: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Build a stable position response with a fixed set of fields."""
+    fields = {k: data.get(k) for k in _POSITION_FIELDS}
+    held = all(v not in (None, "") for v in fields.values())
+    return {"symbol": symbol, "held": held, **fields}
+
+
+def _validate_symbol_instrument(symbol: str) -> str:
+    """Resolve a symbol to its instrument URL, raising on unknown tickers."""
+    instruments = _safe_call(rh.stocks.get_instruments_by_symbols, symbol)
+    if (
+        not isinstance(instruments, list)
+        or not instruments
+        or not isinstance(instruments[0], dict)
+        or not instruments[0].get("url")
+    ):
+        raise RobinhoodError(f"No instrument found for symbol: {symbol}")
+    return instruments[0]["url"]
+
+
+def get_position(symbol: str) -> dict[str, Any]:
+    """Get a single position by symbol without rebuilding all holdings.
+
+    Returns:
+        Dict with held=False if absent, otherwise position details including
+        price, quantity, average_buy_price, equity, percent_change, and equity_change.
+    """
+    symbol = _normalize_symbol(symbol)
+    cached_positions = _get_positions_cached(time.monotonic())
+    if cached_positions is not None:
+        cached_position = cached_positions.get(symbol)
+        if isinstance(cached_position, dict):
+            return _position_payload(symbol, cached_position)
+        _validate_symbol_instrument(symbol)
+        return {"symbol": symbol, "held": False}
+
+    instrument_url = _validate_symbol_instrument(symbol)
+
+    positions = _safe_call(rh.account.get_open_stock_positions)
+    if not isinstance(positions, list):
+        raise RobinhoodError("Unexpected positions response type")
+
+    match = next(
+        (
+            item
+            for item in positions
+            if isinstance(item, dict) and item.get("instrument") == instrument_url
+        ),
+        None,
+    )
+    if not match:
+        return {"symbol": symbol, "held": False}
+
+    quote = get_quote(symbol)
+    price = quote.get("last_trade_price") or quote.get("mark_price")
+    quantity = match.get("quantity")
+    average_buy_price = match.get("average_buy_price")
+    if price in (None, "") or quantity in (None, "") or average_buy_price in (None, ""):
+        raise RobinhoodError(f"Incomplete position data for symbol: {symbol}")
+
+    try:
+        quantity_f = float(quantity)
+        price_f = float(price)
+        average_buy_price_f = float(average_buy_price)
+    except (TypeError, ValueError) as e:
+        raise RobinhoodError(f"Invalid numeric position data for symbol: {symbol}") from e
+
+    equity = quantity_f * price_f
+    equity_change = equity - (quantity_f * average_buy_price_f)
+    percent_change = (
+        0.0
+        if average_buy_price_f == 0.0
+        else ((price_f - average_buy_price_f) * 100 / average_buy_price_f)
+    )
+    return _position_payload(
+        symbol,
+        {
+            "price": f"{price_f:.2f}",
+            "quantity": quantity,
+            "average_buy_price": average_buy_price,
+            "equity": f"{equity:.2f}",
+            "percent_change": f"{percent_change:.2f}",
+            "equity_change": f"{equity_change:.2f}",
+        },
+    )
 
 
 def get_watchlist(name: str = "Default") -> list[dict[str, Any]]:
@@ -79,10 +249,7 @@ def get_quote(symbol: str) -> dict[str, Any]:
     Returns:
         Quote data including last_trade_price, bid, ask, etc.
     """
-    if not symbol or not isinstance(symbol, str):
-        raise RobinhoodError("Symbol must be a non-empty string")
-
-    symbol = symbol.upper().strip()
+    symbol = _normalize_symbol(symbol)
     result = _safe_call(rh.stocks.get_quotes, symbol)
 
     if isinstance(result, list) and len(result) > 0:
@@ -99,10 +266,7 @@ def get_fundamentals(symbol: str) -> dict[str, Any]:
     Returns:
         Fundamentals including pe_ratio, market_cap, dividend_yield, etc.
     """
-    if not symbol or not isinstance(symbol, str):
-        raise RobinhoodError("Symbol must be a non-empty string")
-
-    symbol = symbol.upper().strip()
+    symbol = _normalize_symbol(symbol)
     result = _safe_call(rh.stocks.get_fundamentals, symbol)
 
     if isinstance(result, list) and len(result) > 0:
@@ -125,10 +289,7 @@ def get_historicals(
     Returns:
         List of historical data points with open, close, high, low, volume.
     """
-    if not symbol or not isinstance(symbol, str):
-        raise RobinhoodError("Symbol must be a non-empty string")
-
-    symbol = symbol.upper().strip()
+    symbol = _normalize_symbol(symbol)
 
     valid_intervals = {"5minute", "10minute", "hour", "day", "week"}
     valid_spans = {"day", "week", "month", "3month", "year", "5year"}
@@ -151,10 +312,7 @@ def get_news(symbol: str) -> list[dict[str, Any]]:
     Returns:
         List of news articles with title, url, source, published_at, etc.
     """
-    if not symbol or not isinstance(symbol, str):
-        raise RobinhoodError("Symbol must be a non-empty string")
-
-    symbol = symbol.upper().strip()
+    symbol = _normalize_symbol(symbol)
     result = _safe_call(rh.stocks.get_news, symbol)
     return result if isinstance(result, list) else []
 
@@ -168,10 +326,7 @@ def get_earnings(symbol: str) -> list[dict[str, Any]]:
     Returns:
         List of earnings reports with eps, report date, estimates, etc.
     """
-    if not symbol or not isinstance(symbol, str):
-        raise RobinhoodError("Symbol must be a non-empty string")
-
-    symbol = symbol.upper().strip()
+    symbol = _normalize_symbol(symbol)
     result = _safe_call(rh.stocks.get_earnings, symbol)
     return result if isinstance(result, list) else []
 
@@ -185,10 +340,7 @@ def get_ratings(symbol: str) -> dict[str, Any]:
     Returns:
         Ratings summary with buy, hold, sell counts and summary.
     """
-    if not symbol or not isinstance(symbol, str):
-        raise RobinhoodError("Symbol must be a non-empty string")
-
-    symbol = symbol.upper().strip()
+    symbol = _normalize_symbol(symbol)
     result = _safe_call(rh.stocks.get_ratings, symbol)
 
     if isinstance(result, dict):
