@@ -121,9 +121,12 @@ def get_positions() -> dict[str, dict[str, Any]]:
             return deepcopy(_positions_cache)
 
         result = _safe_call(rh.account.build_holdings)
-        if isinstance(result, dict):
-            _positions_cache = deepcopy(result)
-            _positions_cache_ts = time.monotonic()
+        if not isinstance(result, dict):
+            raise RobinhoodError(
+                f"Unexpected build_holdings response type: {type(result).__name__}"
+            )
+        _positions_cache = deepcopy(result)
+        _positions_cache_ts = time.monotonic()
         return result
 
 
@@ -139,11 +142,9 @@ _POSITION_FIELDS = (
 
 def _position_payload(symbol: str, data: dict[str, Any]) -> dict[str, Any]:
     """Build a stable position response with a fixed set of fields."""
-    return {
-        "symbol": symbol,
-        "held": True,
-        **{k: data.get(k) for k in _POSITION_FIELDS},
-    }
+    fields = {k: data.get(k) for k in _POSITION_FIELDS}
+    held = all(v not in (None, "") for v in fields.values())
+    return {"symbol": symbol, "held": held, **fields}
 
 
 def _validate_symbol_instrument(symbol: str) -> str:

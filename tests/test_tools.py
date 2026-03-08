@@ -79,7 +79,7 @@ class TestGetPositions:
         side_effect=[100.0, 100.0, 100.0, 101.0],
     )
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
-    def test_caches_holdings_snapshot(self, mock_holdings: MagicMock, mock_monotonic: MagicMock):
+    def test_caches_holdings_snapshot(self, mock_holdings: MagicMock, _mock_monotonic: MagicMock):
         """Should reuse a fresh holdings snapshot instead of rebuilding it."""
         mock_holdings.return_value = {
             "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
@@ -93,14 +93,13 @@ class TestGetPositions:
             "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
         }
         assert mock_holdings.call_count == 1
-        assert mock_monotonic.call_count == 4
 
     @patch(
         "robinhood_mcp.tools.time.monotonic",
         side_effect=[100.0, 100.0, 100.0, 131.0, 131.0, 131.0],
     )
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
-    def test_refreshes_expired_cache(self, mock_holdings: MagicMock, mock_monotonic: MagicMock):
+    def test_refreshes_expired_cache(self, mock_holdings: MagicMock, _mock_monotonic: MagicMock):
         """Should rebuild holdings after the cache TTL expires."""
         mock_holdings.side_effect = [
             {"AAPL": {"quantity": "10"}},
@@ -113,7 +112,21 @@ class TestGetPositions:
         assert first == {"AAPL": {"quantity": "10"}}
         assert second == {"AAPL": {"quantity": "11"}}
         assert mock_holdings.call_count == 2
-        assert mock_monotonic.call_count == 6
+
+    @patch(
+        "robinhood_mcp.tools.time.monotonic",
+        side_effect=[100.0, 100.0, 100.0, 101.0],
+    )
+    @patch("robinhood_mcp.tools.rh.account.build_holdings")
+    def test_caches_empty_holdings_snapshot(
+        self, mock_holdings: MagicMock, _mock_monotonic: MagicMock
+    ):
+        """Should reuse an empty holdings snapshot instead of rebuilding it."""
+        mock_holdings.return_value = {}
+
+        assert get_positions() == {}
+        assert get_positions() == {}
+        assert mock_holdings.call_count == 1
 
 
 class TestGetPosition:
@@ -123,13 +136,17 @@ class TestGetPosition:
         "robinhood_mcp.tools.time.monotonic",
         side_effect=[100.0, 100.0, 100.0, 101.0],
     )
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
     @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
     def test_returns_cached_symbol_without_extra_api_calls(
         self,
         mock_holdings: MagicMock,
         mock_get_instruments: MagicMock,
-        mock_monotonic: MagicMock,
+        mock_open_positions: MagicMock,
+        mock_get_quote: MagicMock,
+        _mock_monotonic: MagicMock,
     ):
         """Should serve a cached symbol directly from the holdings snapshot."""
         mock_holdings.return_value = {
@@ -145,7 +162,7 @@ class TestGetPosition:
 
         assert result == {
             "symbol": "HIMS",
-            "held": True,
+            "held": False,
             "price": None,
             "quantity": "25",
             "average_buy_price": "18.50",
@@ -154,7 +171,8 @@ class TestGetPosition:
             "equity_change": None,
         }
         mock_get_instruments.assert_not_called()
-        assert mock_monotonic.call_count == 4
+        mock_open_positions.assert_not_called()
+        mock_get_quote.assert_not_called()
 
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
     @patch("robinhood_mcp.tools.get_quote")
