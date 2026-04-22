@@ -1,61 +1,29 @@
-# Release Please - Automated versioning and PyPI publishing
+# Release workflow for Python packages
 #
 # How it works:
-# 1. Every push to main with conventional commits updates a "Release PR"
-# 2. When you merge the Release PR, it:
-#    - Updates version in pyproject.toml, __init__.py, server.json
-#    - Updates CHANGELOG.md
-#    - Creates a GitHub Release with tag
-#    - Triggers the PyPI publish job below
+# 1. Create a git tag (e.g., v1.0.0)
+# 2. Push the tag to trigger this workflow
+# 3. Workflow builds and publishes to PyPI using Trusted Publishing
 #
-# Commit message format:
-#   feat: add new feature          → minor version bump
-#   fix: fix a bug                 → patch version bump
-#   feat!: breaking change         → major version bump
-#   chore/docs: no version bump
-#
-# PyPI Publishing:
-#   Uses Trusted Publishing (OIDC) - no PyPI token needed!
-#   Configure at: https://pypi.org/manage/project/robinhood-mcp/settings/publishing/
-#
-# RELEASE_PLEASE_TOKEN:
-#   Uses org-level PAT so the Release PR triggers CI workflows.
-#   PRs created by GITHUB_TOKEN don't trigger other workflows (GitHub security).
+# PyPI Trusted Publishing:
+#   No API tokens needed! Configure at:
+#   https://pypi.org/manage/project/{package-name}/settings/publishing/
+#   Add this repository as a trusted publisher.
 
-name: Release Please
+name: Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: write
-  issues: write
-  pull-requests: write
+  id-token: write
 
 jobs:
-  release-please:
+  build:
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
-        with:
-          manifest-file: ".release-please-manifest.json"
-          config-file: "release-please-config.json"
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-
-  pypi-publish:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -71,5 +39,37 @@ jobs:
       - name: Build package
         run: python -m build
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  create-release:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true

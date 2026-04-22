@@ -5,20 +5,10 @@ updates:
     schedule:
       interval: "weekly"
     groups:
-      production-dependencies:
-        patterns:
-          - "*"
-        exclude-patterns:
-          - "pytest*"
-          - "ruff"
-          - "black"
-          - "mypy"
+      runtime-dependencies:
+        dependency-type: "production"
       dev-dependencies:
-        patterns:
-          - "pytest*"
-          - "ruff"
-          - "black"
-          - "mypy"
+        dependency-type: "development"
     commit-message:
       prefix: "chore(deps)"
     open-pull-requests-limit: 10
