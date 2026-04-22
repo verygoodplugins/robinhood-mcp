@@ -3,7 +3,7 @@
   "name": "io.github.verygoodplugins/robinhood-mcp",
   "title": "Robinhood Portfolio Research",
   "description": "Read-only research tools for Robinhood portfolio data",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "websiteUrl": "https://verygoodplugins.com/?utm_source=mcp-registry",
   "repository": {
     "url": "https://github.com/verygoodplugins/robinhood-mcp",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "robinhood-mcp",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "transport": {
         "type": "stdio"
       }
