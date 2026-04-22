@@ -97,39 +97,6 @@ def get_portfolio() -> dict[str, Any]:
     return _safe_call(rh.profiles.load_portfolio_profile)
 
 
-def get_positions() -> dict[str, dict[str, Any]]:
-    """Get all current stock positions with details.
-
-    Returns:
-        Dict mapping symbol to position details including:
-        - price, quantity, average_buy_price
-        - equity, percent_change, equity_change
-    """
-    global _positions_cache, _positions_cache_ts
-
-    now = time.monotonic()
-    cached = _get_positions_cached(now)
-    if cached is not None:
-        return cached
-
-    with _positions_cache_lock:
-        now = time.monotonic()
-        if (
-            _positions_cache is not None
-            and (now - _positions_cache_ts) < _POSITIONS_CACHE_TTL_SECONDS
-        ):
-            return deepcopy(_positions_cache)
-
-        result = _safe_call(rh.account.build_holdings)
-        if not isinstance(result, dict):
-            raise RobinhoodError(
-                f"Unexpected build_holdings response type: {type(result).__name__}"
-            )
-        _positions_cache = deepcopy(result)
-        _positions_cache_ts = time.monotonic()
-        return result
-
-
 _POSITION_FIELDS = (
     "price",
     "quantity",
@@ -138,6 +105,53 @@ _POSITION_FIELDS = (
     "percent_change",
     "equity_change",
 )
+
+
+def _slim_positions(positions: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Slim down positions to only essential fields for LLM analysis.
+
+    Strips internal IDs, URLs, and other metadata that bloat context windows.
+    """
+    return {
+        symbol: {k: data.get(k) for k in _POSITION_FIELDS} for symbol, data in positions.items()
+    }
+
+
+def get_positions() -> dict[str, dict[str, Any]]:
+    """Get all current stock positions with details.
+
+    Returns:
+        Dict mapping symbol to position details including:
+        - price, quantity, average_buy_price
+        - equity, percent_change, equity_change
+
+    Note:
+        Response is slimmed to essential fields only. Internal IDs, URLs,
+        and other metadata are stripped to reduce context bloat.
+    """
+    global _positions_cache, _positions_cache_ts
+
+    now = time.monotonic()
+    cached = _get_positions_cached(now)
+    if cached is not None:
+        return _slim_positions(cached)
+
+    with _positions_cache_lock:
+        now = time.monotonic()
+        if (
+            _positions_cache is not None
+            and (now - _positions_cache_ts) < _POSITIONS_CACHE_TTL_SECONDS
+        ):
+            return _slim_positions(deepcopy(_positions_cache))
+
+        result = _safe_call(rh.account.build_holdings)
+        if not isinstance(result, dict):
+            raise RobinhoodError(
+                f"Unexpected build_holdings response type: {type(result).__name__}"
+            )
+        _positions_cache = deepcopy(result)
+        _positions_cache_ts = time.monotonic()
+        return _slim_positions(result)
 
 
 def _position_payload(symbol: str, data: dict[str, Any]) -> dict[str, Any]:

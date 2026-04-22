@@ -62,17 +62,64 @@ class TestGetPositions:
     """Tests for get_positions function."""
 
     @patch("robinhood_mcp.tools.rh.account.build_holdings")
-    def test_returns_holdings(self, mock_holdings: MagicMock):
-        """Should return holdings dict."""
-        expected = {
-            "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
-            "TSLA": {"quantity": "5", "average_buy_price": "200.00"},
+    def test_returns_slimmed_holdings(self, mock_holdings: MagicMock):
+        """Should return holdings dict with only essential fields."""
+        mock_holdings.return_value = {
+            "AAPL": {
+                "quantity": "10",
+                "average_buy_price": "150.00",
+                "price": "175.00",
+                "equity": "1750.00",
+                "percent_change": "16.67",
+                "equity_change": "250.00",
+                "id": "abc123",
+                "name": "Apple Inc.",
+                "type": "stock",
+                "instrument": "https://api.robinhood.com/instruments/abc/",
+                "account": "https://api.robinhood.com/accounts/xyz/",
+            },
+            "TSLA": {
+                "quantity": "5",
+                "average_buy_price": "200.00",
+                "price": "250.00",
+                "equity": "1250.00",
+                "percent_change": "25.00",
+                "equity_change": "250.00",
+                "id": "def456",
+                "name": "Tesla, Inc.",
+                "type": "stock",
+                "instrument": "https://api.robinhood.com/instruments/def/",
+                "account": "https://api.robinhood.com/accounts/xyz/",
+            },
         }
-        mock_holdings.return_value = expected
 
         result = get_positions()
 
-        assert result == expected
+        # Should only contain slim fields, not id, name, type, instrument, account
+        assert result == {
+            "AAPL": {
+                "quantity": "10",
+                "average_buy_price": "150.00",
+                "price": "175.00",
+                "equity": "1750.00",
+                "percent_change": "16.67",
+                "equity_change": "250.00",
+            },
+            "TSLA": {
+                "quantity": "5",
+                "average_buy_price": "200.00",
+                "price": "250.00",
+                "equity": "1250.00",
+                "percent_change": "25.00",
+                "equity_change": "250.00",
+            },
+        }
+        # Verify excluded fields are not present
+        assert "id" not in result["AAPL"]
+        assert "name" not in result["AAPL"]
+        assert "type" not in result["AAPL"]
+        assert "instrument" not in result["AAPL"]
+        assert "account" not in result["AAPL"]
 
     @patch(
         "robinhood_mcp.tools.time.monotonic",
@@ -82,7 +129,14 @@ class TestGetPositions:
     def test_caches_holdings_snapshot(self, mock_holdings: MagicMock, _mock_monotonic: MagicMock):
         """Should reuse a fresh holdings snapshot instead of rebuilding it."""
         mock_holdings.return_value = {
-            "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
+            "AAPL": {
+                "quantity": "10",
+                "average_buy_price": "150.00",
+                "price": "175.00",
+                "equity": "1750.00",
+                "percent_change": "16.67",
+                "equity_change": "250.00",
+            },
         }
 
         first = get_positions()
@@ -90,7 +144,14 @@ class TestGetPositions:
         second = get_positions()
 
         assert second == {
-            "AAPL": {"quantity": "10", "average_buy_price": "150.00"},
+            "AAPL": {
+                "quantity": "10",
+                "average_buy_price": "150.00",
+                "price": "175.00",
+                "equity": "1750.00",
+                "percent_change": "16.67",
+                "equity_change": "250.00",
+            },
         }
         assert mock_holdings.call_count == 1
 
@@ -102,15 +163,51 @@ class TestGetPositions:
     def test_refreshes_expired_cache(self, mock_holdings: MagicMock, _mock_monotonic: MagicMock):
         """Should rebuild holdings after the cache TTL expires."""
         mock_holdings.side_effect = [
-            {"AAPL": {"quantity": "10"}},
-            {"AAPL": {"quantity": "11"}},
+            {
+                "AAPL": {
+                    "quantity": "10",
+                    "average_buy_price": "150.00",
+                    "price": "175.00",
+                    "equity": "1750.00",
+                    "percent_change": "16.67",
+                    "equity_change": "250.00",
+                },
+            },
+            {
+                "AAPL": {
+                    "quantity": "11",
+                    "average_buy_price": "150.00",
+                    "price": "175.00",
+                    "equity": "1925.00",
+                    "percent_change": "16.67",
+                    "equity_change": "275.00",
+                },
+            },
         ]
 
         first = get_positions()
         second = get_positions()
 
-        assert first == {"AAPL": {"quantity": "10"}}
-        assert second == {"AAPL": {"quantity": "11"}}
+        assert first == {
+            "AAPL": {
+                "quantity": "10",
+                "average_buy_price": "150.00",
+                "price": "175.00",
+                "equity": "1750.00",
+                "percent_change": "16.67",
+                "equity_change": "250.00",
+            },
+        }
+        assert second == {
+            "AAPL": {
+                "quantity": "11",
+                "average_buy_price": "150.00",
+                "price": "175.00",
+                "equity": "1925.00",
+                "percent_change": "16.67",
+                "equity_change": "275.00",
+            },
+        }
         assert mock_holdings.call_count == 2
 
     @patch(
