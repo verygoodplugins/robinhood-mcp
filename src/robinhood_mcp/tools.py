@@ -538,12 +538,16 @@ def get_order_history(
     rows.sort(key=lambda order: order.get("created_at") or "", reverse=True)
     rows = rows[:limit]
 
-    return [
-        _order_payload(
-            order,
-            resolved_symbol
-            if resolved_symbol is not None
-            else _resolve_symbol_by_url(order.get("instrument") or ""),
-        )
-        for order in rows
-    ]
+    if resolved_symbol is not None:
+        return [_order_payload(order, resolved_symbol) for order in rows]
+
+    # Resolve each distinct instrument URL once per call. The module-level
+    # cache only stores *successful* lookups, so without this an unresolvable
+    # URL shared by many rows would re-hit the API once per row.
+    url_to_symbol: dict[str, str | None] = {}
+    for order in rows:
+        url = order.get("instrument") or ""
+        if url not in url_to_symbol:
+            url_to_symbol[url] = _resolve_symbol_by_url(url)
+
+    return [_order_payload(order, url_to_symbol[order.get("instrument") or ""]) for order in rows]

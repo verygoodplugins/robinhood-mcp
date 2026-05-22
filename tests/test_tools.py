@@ -752,6 +752,25 @@ class TestGetOrderHistory:
         assert result[0]["symbol"] is None
         assert result[0]["state"] == "filled"
 
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_failed_resolution_attempted_once_per_call(
+        self, mock_orders: MagicMock, mock_symbol: MagicMock
+    ):
+        """A failing instrument lookup is attempted once per call, not once per
+        row - many orders for one unresolvable instrument must not storm the API."""
+        mock_orders.return_value = [
+            _make_order(instrument="https://instrument/x/", created_at="2026-01-03T00:00:00Z"),
+            _make_order(instrument="https://instrument/x/", created_at="2026-01-02T00:00:00Z"),
+            _make_order(instrument="https://instrument/x/", created_at="2026-01-01T00:00:00Z"),
+        ]
+        mock_symbol.side_effect = Exception("rate limited")
+
+        result = get_order_history()
+
+        assert [row["symbol"] for row in result] == [None, None, None]
+        assert mock_symbol.call_count == 1
+
     @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
     def test_returns_empty_list_when_no_orders(self, mock_orders: MagicMock):
         """Should return an empty list when the account has no orders."""
