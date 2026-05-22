@@ -29,6 +29,10 @@
       "description": "Get current stock holdings"
     },
     {
+      "name": "robinhood_get_position",
+      "description": "Get one stock holding by ticker"
+    },
+    {
       "name": "robinhood_get_watchlist",
       "description": "Get watchlist stocks"
     },
@@ -63,6 +67,10 @@
     {
       "name": "robinhood_get_options_positions",
       "description": "Get options positions"
+    },
+    {
+      "name": "robinhood_get_order_history",
+      "description": "Get stock order history (buys and sells)"
     },
     {
       "name": "robinhood_search_symbols",

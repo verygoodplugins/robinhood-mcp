@@ -60,6 +60,12 @@ Stay ahead of earnings volatility with a personalized calendar.
 
 Understand which positions are contributing most to your performance.
 
+### Trade History
+
+> "Show me my HIMS order history - every buy and sell with prices and dates."
+
+Review the executed orders behind your positions, with per-fill detail useful for cost-basis and tax research.
+
 ### Watchlist Research
 
 > "Pull quotes and fundamentals for everything in my watchlist. Which ones look interesting right now?"
@@ -131,6 +137,7 @@ claude mcp add robinhood -- uvx robinhood-mcp
 | `robinhood_get_ratings`           | Analyst buy/hold/sell ratings                        |
 | `robinhood_get_dividends`         | Dividend payment history                             |
 | `robinhood_get_options_positions` | Current options positions                            |
+| `robinhood_get_order_history`     | Order history (buys/sells) with per-fill detail      |
 | `robinhood_search_symbols`        | Search stocks by name or ticker                      |
 
 ## Example Conversations

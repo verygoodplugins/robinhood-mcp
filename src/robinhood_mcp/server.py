@@ -17,6 +17,7 @@ from .tools import (
     get_historicals,
     get_news,
     get_options_positions,
+    get_order_history,
     get_portfolio,
     get_position,
     get_positions,
@@ -254,6 +255,34 @@ def robinhood_get_options_positions() -> list:
     """
     _ensure_logged_in()
     return get_options_positions()
+
+
+@mcp.tool()
+def robinhood_get_order_history(
+    symbol: str | None = None,
+    state: Literal["executed", "all"] = "executed",
+    limit: int = 50,
+    start_date: str | None = None,
+) -> list:
+    """Get historical stock order history (executed buys and sells).
+
+    This is your trade history - the orders that built your current holdings.
+    For what you hold *now* use robinhood_get_positions; for dividend income
+    use robinhood_get_dividends. Read-only: never places or cancels orders.
+
+    Args:
+        symbol: Optional ticker filter (e.g., "AAPL"). Omit for all symbols.
+        state: "executed" (default) returns only orders that filled, including
+            partial fills; "all" also returns cancelled/queued/rejected orders.
+        limit: Maximum number of orders to return, most recent first.
+        start_date: Optional "YYYY-MM-DD" lower bound, applied server-side.
+
+    Returns a list of order rows (newest first) with symbol, side, state,
+    quantity, filled quantity, average price, type, timestamps, and per-fill
+    executions.
+    """
+    _ensure_logged_in()
+    return get_order_history(symbol, state, limit, start_date)
 
 
 @mcp.tool()
