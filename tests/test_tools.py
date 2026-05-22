@@ -13,6 +13,7 @@ from robinhood_mcp.tools import (
     get_historicals,
     get_news,
     get_options_positions,
+    get_order_history,
     get_portfolio,
     get_position,
     get_positions,
@@ -29,6 +30,48 @@ def clear_positions_cache():
     tools_module._clear_positions_cache()
     yield
     tools_module._clear_positions_cache()
+
+
+@pytest.fixture(autouse=True)
+def clear_symbol_cache():
+    """Reset the instrument-URL to symbol cache between tests."""
+    tools_module._clear_symbol_cache()
+    yield
+    tools_module._clear_symbol_cache()
+
+
+def _make_order(
+    instrument: str = "https://instrument/hims/",
+    side: str = "buy",
+    state: str = "filled",
+    created_at: str = "2026-01-01T00:00:00.000000Z",
+    executions: list | None = None,
+) -> dict:
+    """Build a robin_stocks-shaped stock order dict for tests."""
+    if executions is None:
+        executions = [
+            {
+                "price": "20.00",
+                "quantity": "10.00000000",
+                "timestamp": created_at,
+                "settlement_date": "2026-01-03",
+            }
+        ]
+    return {
+        "id": "order-id",
+        "instrument": instrument,
+        "side": side,
+        "state": state,
+        "quantity": "10.00000000",
+        "cumulative_quantity": "10.00000000",
+        "average_price": "20.00",
+        "price": "20.00",
+        "type": "limit",
+        "created_at": created_at,
+        "updated_at": created_at,
+        "last_transaction_at": created_at,
+        "executions": executions,
+    }
 
 
 class TestGetPortfolio:
@@ -528,3 +571,188 @@ class TestSearchSymbols:
         with pytest.raises(RobinhoodError) as exc_info:
             search_symbols("")
         assert "non-empty string" in str(exc_info.value)
+
+
+class TestGetOrderHistory:
+    """Tests for get_order_history function."""
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_returns_curated_rows_with_resolved_symbols(
+        self, mock_orders: MagicMock, mock_symbol: MagicMock
+    ):
+        """Should return curated rows with instrument URLs resolved to symbols."""
+        mock_orders.return_value = [_make_order()]
+        mock_symbol.return_value = "HIMS"
+
+        result = get_order_history()
+
+        assert result == [
+            {
+                "symbol": "HIMS",
+                "side": "buy",
+                "state": "filled",
+                "quantity": "10.00000000",
+                "filled_quantity": "10.00000000",
+                "average_price": "20.00",
+                "type": "limit",
+                "created_at": "2026-01-01T00:00:00.000000Z",
+                "last_transaction_at": "2026-01-01T00:00:00.000000Z",
+                "executions": [
+                    {
+                        "price": "20.00",
+                        "quantity": "10.00000000",
+                        "timestamp": "2026-01-01T00:00:00.000000Z",
+                    }
+                ],
+            }
+        ]
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_resolves_each_distinct_instrument_once(
+        self, mock_orders: MagicMock, mock_symbol: MagicMock
+    ):
+        """Should resolve each distinct instrument URL only once, not per order."""
+        mock_orders.return_value = [
+            _make_order(instrument="https://instrument/hims/", created_at="2026-03-03T00:00:00Z"),
+            _make_order(instrument="https://instrument/hims/", created_at="2026-02-02T00:00:00Z"),
+            _make_order(instrument="https://instrument/aapl/", created_at="2026-01-01T00:00:00Z"),
+        ]
+        mock_symbol.side_effect = lambda url: {
+            "https://instrument/hims/": "HIMS",
+            "https://instrument/aapl/": "AAPL",
+        }[url]
+
+        result = get_order_history()
+
+        assert [row["symbol"] for row in result] == ["HIMS", "HIMS", "AAPL"]
+        assert mock_symbol.call_count == 2
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_executed_filter_keeps_filled_and_partial_fills(
+        self, mock_orders: MagicMock, mock_symbol: MagicMock
+    ):
+        """Default state='executed' should keep filled AND partially_filled orders."""
+        mock_symbol.return_value = "HIMS"
+        mock_orders.return_value = [
+            _make_order(state="filled", created_at="2026-01-04T00:00:00Z"),
+            _make_order(
+                state="partially_filled",
+                created_at="2026-01-03T00:00:00Z",
+                executions=[
+                    {"price": "20.00", "quantity": "5", "timestamp": "2026-01-03T00:00:00Z"}
+                ],
+            ),
+            _make_order(state="cancelled", created_at="2026-01-02T00:00:00Z", executions=[]),
+            _make_order(state="queued", created_at="2026-01-01T00:00:00Z", executions=[]),
+        ]
+
+        result = get_order_history()
+
+        assert [row["state"] for row in result] == ["filled", "partially_filled"]
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_state_all_returns_every_order(self, mock_orders: MagicMock, mock_symbol: MagicMock):
+        """state='all' should return cancelled and queued orders too."""
+        mock_symbol.return_value = "HIMS"
+        mock_orders.return_value = [
+            _make_order(state="filled", created_at="2026-01-02T00:00:00Z"),
+            _make_order(state="cancelled", created_at="2026-01-01T00:00:00Z", executions=[]),
+        ]
+
+        result = get_order_history(state="all")
+
+        assert [row["state"] for row in result] == ["filled", "cancelled"]
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_symbol_filter_restricts_to_one_instrument(
+        self,
+        mock_orders: MagicMock,
+        mock_instruments: MagicMock,
+        mock_symbol: MagicMock,
+    ):
+        """A symbol filter keeps only that instrument and skips per-row resolution."""
+        mock_instruments.return_value = [{"url": "https://instrument/hims/"}]
+        mock_orders.return_value = [
+            _make_order(instrument="https://instrument/hims/", created_at="2026-01-02T00:00:00Z"),
+            _make_order(instrument="https://instrument/aapl/", created_at="2026-01-01T00:00:00Z"),
+        ]
+
+        result = get_order_history(symbol="hims")
+
+        assert [row["symbol"] for row in result] == ["HIMS"]
+        mock_instruments.assert_called_once_with("HIMS")
+        mock_symbol.assert_not_called()
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_limit_returns_most_recent_first(self, mock_orders: MagicMock, mock_symbol: MagicMock):
+        """Should sort newest-first by created_at and slice to limit."""
+        mock_symbol.return_value = "HIMS"
+        mock_orders.return_value = [
+            _make_order(created_at="2026-01-01T00:00:00Z"),
+            _make_order(created_at="2026-03-03T00:00:00Z"),
+            _make_order(created_at="2026-02-02T00:00:00Z"),
+        ]
+
+        result = get_order_history(limit=2)
+
+        assert [row["created_at"] for row in result] == [
+            "2026-03-03T00:00:00Z",
+            "2026-02-02T00:00:00Z",
+        ]
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_start_date_forwarded_to_api(self, mock_orders: MagicMock, mock_symbol: MagicMock):
+        """start_date should be forwarded to robin_stocks for server-side filtering."""
+        mock_symbol.return_value = "HIMS"
+        mock_orders.return_value = [_make_order()]
+
+        get_order_history(start_date="2026-01-01")
+
+        assert mock_orders.call_args.kwargs.get("start_date") == "2026-01-01"
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_unresolvable_instrument_yields_none_symbol(
+        self, mock_orders: MagicMock, mock_symbol: MagicMock
+    ):
+        """A failed symbol lookup should not fail the call - symbol falls back to None."""
+        mock_orders.return_value = [_make_order()]
+        mock_symbol.side_effect = Exception("instrument lookup failed")
+
+        result = get_order_history()
+
+        assert result[0]["symbol"] is None
+        assert result[0]["state"] == "filled"
+
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_returns_empty_list_when_no_orders(self, mock_orders: MagicMock):
+        """Should return an empty list when the account has no orders."""
+        mock_orders.return_value = []
+
+        assert get_order_history() == []
+
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_raises_on_non_list_response(self, mock_orders: MagicMock):
+        """Should raise RobinhoodError when the API returns an unexpected type."""
+        mock_orders.return_value = {"unexpected": "shape"}
+
+        with pytest.raises(RobinhoodError):
+            get_order_history()
+
+    def test_raises_for_invalid_state(self):
+        """Should raise RobinhoodError for an unsupported state filter."""
+        with pytest.raises(RobinhoodError):
+            get_order_history(state="bogus")  # type: ignore[arg-type]
+
+    def test_raises_for_invalid_limit(self):
+        """Should raise RobinhoodError for a non-positive limit."""
+        with pytest.raises(RobinhoodError):
+            get_order_history(limit=0)

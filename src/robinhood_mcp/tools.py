@@ -410,3 +410,128 @@ def search_symbols(query: str) -> list[dict[str, Any]]:
         return result if isinstance(result, list) else []
     except Exception as e:
         raise RobinhoodError(f"Search failed: {e}") from e
+
+
+# Instrument-URL -> symbol resolution. Mappings are immutable, so this cache
+# has no TTL; it only grows by the number of distinct instruments ever seen.
+_symbol_url_cache: dict[str, str] = {}
+_symbol_url_cache_lock = threading.Lock()
+
+
+def _clear_symbol_cache() -> None:
+    """Reset the cached instrument-URL to symbol lookups."""
+    with _symbol_url_cache_lock:
+        _symbol_url_cache.clear()
+
+
+def _resolve_symbol_by_url(url: str) -> str | None:
+    """Resolve an instrument URL to its ticker symbol, caching the result.
+
+    Returns None instead of raising when a lookup fails, so a single
+    unresolvable instrument cannot fail an entire order-history response.
+    """
+    if not url or not isinstance(url, str):
+        return None
+
+    with _symbol_url_cache_lock:
+        cached = _symbol_url_cache.get(url)
+    if cached is not None:
+        return cached
+
+    try:
+        symbol = rh.stocks.get_symbol_by_url(url)
+    except Exception:
+        return None
+    if not isinstance(symbol, str) or not symbol:
+        return None
+
+    with _symbol_url_cache_lock:
+        _symbol_url_cache[url] = symbol
+    return symbol
+
+
+def _order_payload(order: dict[str, Any], symbol: str | None) -> dict[str, Any]:
+    """Build a curated order row with a fixed set of high-signal fields."""
+    raw_executions = order.get("executions") or []
+    executions = [
+        {
+            "price": execution.get("price"),
+            "quantity": execution.get("quantity"),
+            "timestamp": execution.get("timestamp"),
+        }
+        for execution in raw_executions
+        if isinstance(execution, dict)
+    ]
+    return {
+        "symbol": symbol,
+        "side": order.get("side"),
+        "state": order.get("state"),
+        "quantity": order.get("quantity"),
+        "filled_quantity": order.get("cumulative_quantity"),
+        "average_price": order.get("average_price"),
+        "type": order.get("type"),
+        "created_at": order.get("created_at"),
+        "last_transaction_at": order.get("last_transaction_at"),
+        "executions": executions,
+    }
+
+
+def get_order_history(
+    symbol: str | None = None,
+    state: Literal["executed", "all"] = "executed",
+    limit: int = 50,
+    start_date: str | None = None,
+) -> list[dict[str, Any]]:
+    """Get historical stock order history (executed buys and sells).
+
+    Wraps robin_stocks order history into curated, symbol-resolved rows with
+    per-fill execution detail. Read-only - this never places or cancels orders.
+
+    Args:
+        symbol: Optional ticker filter (e.g., "AAPL"). When given, only that
+            stock's orders are returned.
+        state: "executed" (default) returns only orders that filled, including
+            partial fills; "all" returns every order, including cancelled,
+            queued, and rejected ones.
+        limit: Maximum number of orders to return, most recent first.
+        start_date: Optional "YYYY-MM-DD" lower bound, applied server-side.
+
+    Returns:
+        List of order rows, newest first, each with symbol, side, state,
+        quantity, filled_quantity, average_price, type, created_at,
+        last_transaction_at, and a list of executions (price, quantity,
+        timestamp).
+    """
+    if state not in ("executed", "all"):
+        raise RobinhoodError('Invalid state. Must be "executed" or "all"')
+    if not isinstance(limit, int) or limit <= 0:
+        raise RobinhoodError("limit must be a positive integer")
+
+    instrument_url: str | None = None
+    resolved_symbol: str | None = None
+    if symbol is not None:
+        resolved_symbol = _normalize_symbol(symbol)
+        instrument_url = _validate_symbol_instrument(resolved_symbol)
+
+    orders = _safe_call(rh.orders.get_all_stock_orders, start_date=start_date)
+    if not isinstance(orders, list):
+        raise RobinhoodError(f"Unexpected order history response type: {type(orders).__name__}")
+
+    rows = [order for order in orders if isinstance(order, dict)]
+    if instrument_url is not None:
+        rows = [order for order in rows if order.get("instrument") == instrument_url]
+    if state == "executed":
+        rows = [order for order in rows if order.get("executions")]
+
+    rows.sort(key=lambda order: order.get("created_at") or "", reverse=True)
+    rows = rows[:limit]
+
+    return [
+        _order_payload(
+            order,
+            resolved_symbol
+            if resolved_symbol is not None
+            else _resolve_symbol_by_url(order.get("instrument") or ""),
+        )
+        for order in rows
+    ]

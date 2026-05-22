@@ -65,6 +65,10 @@
       "description": "Get options positions"
     },
     {
+      "name": "robinhood_get_order_history",
+      "description": "Get stock order history (buys and sells)"
+    },
+    {
       "name": "robinhood_search_symbols",
       "description": "Search for stock symbols"
     }
