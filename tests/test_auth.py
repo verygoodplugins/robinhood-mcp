@@ -5,7 +5,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robinhood_mcp.auth import (
+    _DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    _MIN_APPROVAL_TIMEOUT_SECONDS,
     AuthenticationError,
+    _approval_timeout_seconds,
     _clear_stale_pickle,
     _patched_validate_sherrif_id,
     get_totp_code,
@@ -343,6 +346,31 @@ class TestPatchedValidationWorkflow:
         _patched_validate_sherrif_id("device-token", "workflow-id")
 
         assert mock_request_post.call_count == 3
+
+
+class TestApprovalTimeout:
+    """Tests for the ROBINHOOD_APPROVAL_TIMEOUT env var override."""
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_returns_default_when_unset(self):
+        assert _approval_timeout_seconds() == _DEFAULT_APPROVAL_TIMEOUT_SECONDS
+
+    @patch.dict("os.environ", {"ROBINHOOD_APPROVAL_TIMEOUT": "60"}, clear=True)
+    def test_respects_valid_override(self):
+        assert _approval_timeout_seconds() == 60.0
+
+    @patch.dict("os.environ", {"ROBINHOOD_APPROVAL_TIMEOUT": "0.5"}, clear=True)
+    def test_clamps_below_minimum(self):
+        """Pathologically small values are floored to a safe minimum."""
+        assert _approval_timeout_seconds() == _MIN_APPROVAL_TIMEOUT_SECONDS
+
+    @patch.dict("os.environ", {"ROBINHOOD_APPROVAL_TIMEOUT": "not-a-number"}, clear=True)
+    def test_falls_back_to_default_on_garbage(self, capsys: pytest.CaptureFixture[str]):
+        assert _approval_timeout_seconds() == _DEFAULT_APPROVAL_TIMEOUT_SECONDS
+        captured = capsys.readouterr()
+        # Warning must go to stderr — stdout would corrupt MCP JSON-RPC transport.
+        assert "ROBINHOOD_APPROVAL_TIMEOUT" in captured.err
+        assert captured.out == ""
 
 
 class TestIsLoggedIn:
