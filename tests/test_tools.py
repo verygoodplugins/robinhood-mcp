@@ -668,6 +668,26 @@ class TestGetOrderHistory:
         assert [row["state"] for row in result] == ["filled", "cancelled"]
 
     @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_malformed_executions_treated_as_no_fills(
+        self, mock_orders: MagicMock, mock_symbol: MagicMock
+    ):
+        """An order whose executions field is not a list of dicts is treated as
+        having no fills: curated to [] without crashing, and dropped by the
+        default state='executed' filter."""
+        mock_symbol.return_value = "HIMS"
+        mock_orders.return_value = [
+            _make_order(state="filled", executions=5),  # type: ignore[arg-type]
+        ]
+
+        # state="all" must curate the malformed value to [] rather than crash.
+        all_rows = get_order_history(state="all")
+        assert all_rows[0]["executions"] == []
+
+        # state="executed" must drop it - a non-list value is not a real fill.
+        assert get_order_history() == []
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
     @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
     @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
     def test_symbol_filter_restricts_to_one_instrument(

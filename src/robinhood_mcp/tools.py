@@ -450,17 +450,29 @@ def _resolve_symbol_by_url(url: str) -> str | None:
     return symbol
 
 
+def _raw_executions(order: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return an order's executions as a list of dicts, tolerating malformed data.
+
+    The robin_stocks payload normally carries ``executions`` as a list, but a
+    non-list value must neither crash a whole order-history response nor be
+    counted as a fill - it is treated as no executions. This single definition
+    keeps the ``state="executed"`` filter and the curated payload consistent.
+    """
+    raw = order.get("executions")
+    if not isinstance(raw, list):
+        return []
+    return [execution for execution in raw if isinstance(execution, dict)]
+
+
 def _order_payload(order: dict[str, Any], symbol: str | None) -> dict[str, Any]:
     """Build a curated order row with a fixed set of high-signal fields."""
-    raw_executions = order.get("executions") or []
     executions = [
         {
             "price": execution.get("price"),
             "quantity": execution.get("quantity"),
             "timestamp": execution.get("timestamp"),
         }
-        for execution in raw_executions
-        if isinstance(execution, dict)
+        for execution in _raw_executions(order)
     ]
     return {
         "symbol": symbol,
@@ -521,7 +533,7 @@ def get_order_history(
     if instrument_url is not None:
         rows = [order for order in rows if order.get("instrument") == instrument_url]
     if state == "executed":
-        rows = [order for order in rows if order.get("executions")]
+        rows = [order for order in rows if _raw_executions(order)]
 
     rows.sort(key=lambda order: order.get("created_at") or "", reverse=True)
     rows = rows[:limit]

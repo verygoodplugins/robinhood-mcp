@@ -29,6 +29,10 @@
       "description": "Get current stock holdings"
     },
     {
+      "name": "robinhood_get_position",
+      "description": "Get one stock holding by ticker"
+    },
+    {
       "name": "robinhood_get_watchlist",
       "description": "Get watchlist stocks"
     },
