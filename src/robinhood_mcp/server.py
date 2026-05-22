@@ -1,5 +1,6 @@
 """FastMCP server for Robinhood portfolio research."""
 
+import math
 import sys
 import threading
 import time
@@ -92,7 +93,10 @@ def _ensure_logged_in() -> None:
         if _auth_failure_message is not None:
             elapsed = time.monotonic() - _auth_failure_ts
             if elapsed < _AUTH_FAILURE_COOLDOWN_SECONDS:
-                remaining = int(_AUTH_FAILURE_COOLDOWN_SECONDS - elapsed)
+                # Ceil so the message never claims "0s" while still inside
+                # the cooldown — int() floors and would lie about sub-second
+                # tails.
+                remaining = math.ceil(_AUTH_FAILURE_COOLDOWN_SECONDS - elapsed)
                 raise RobinhoodError(
                     f"Not logged in: {_auth_failure_message} "
                     f"(cached failure; will retry in {remaining}s)"
