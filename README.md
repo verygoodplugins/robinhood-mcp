@@ -91,10 +91,30 @@ uvx robinhood-mcp
 ```bash
 export ROBINHOOD_USERNAME="your_email"
 export ROBINHOOD_PASSWORD="your_password"
-export ROBINHOOD_TOTP_SECRET="your_2fa_secret"  # Only if you use authenticator app
+export ROBINHOOD_TOTP_SECRET="your_2fa_secret"          # if your account exposes TOTP (see below)
+export ROBINHOOD_APPROVAL_TIMEOUT="60"                  # optional — seconds to wait for push approval
 ```
 
-**Note:** If you use Face ID, Touch ID, or passcode login on Robinhood (no authenticator app), you don't need `ROBINHOOD_TOTP_SECRET`.
+**For Claude Desktop and other headless deployments, you have two paths:**
+
+1. **TOTP, if your account exposes it.** Set `ROBINHOOD_TOTP_SECRET` to the
+   base32 authenticator-app secret (found at *Account → Security → Two-Factor
+   Authentication* in the Robinhood mobile app or at robinhood.com). Login is
+   fast, non-interactive, and survives restarts.
+2. **Push approval, otherwise.** Leave `ROBINHOOD_TOTP_SECRET` unset. The
+   first tool call after a restart triggers a push notification in the
+   Robinhood mobile app — tap "Approve" within `ROBINHOOD_APPROVAL_TIMEOUT`
+   seconds (default 60). After that one approval, the session is cached in
+   `~/.tokens/robinhood.pickle` and reused for days/weeks, with no further
+   interaction until natural expiry.
+
+Newer Robinhood accounts that use passkeys or biometric login as their primary
+2FA may not surface a TOTP option in either the iOS app or web settings —
+push approval works fine for these accounts.
+
+After an authentication failure the server caches the error for ~5 minutes so
+subsequent tool calls fail fast instead of re-blocking the MCP server while
+re-attempting the full login flow. Restart Claude Desktop to retry sooner.
 
 ### Claude Desktop
 
@@ -114,6 +134,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   }
 }
 ```
+
+If your account has TOTP enrollment available, add
+`"ROBINHOOD_TOTP_SECRET": "your_2fa_secret"` to the `env` block above.
 
 ### Claude Code
 
@@ -205,6 +228,14 @@ robinhood-mcp
 - Verify your username and password are correct
 - If you have 2FA with an authenticator app, you need `ROBINHOOD_TOTP_SECRET`
 - Try logging in through the Robinhood app to ensure your account isn't locked
+- **Tool calls hang briefly then fail with "Login returned empty result":** no
+  cached session and no `ROBINHOOD_TOTP_SECRET`, so the server is waiting for
+  you to approve a push notification in the Robinhood mobile app. Tap
+  "Approve" within `ROBINHOOD_APPROVAL_TIMEOUT` seconds (default 60) and call
+  the tool again — the session pickle is now cached and subsequent calls won't
+  prompt. If TOTP is available on your account, adding `ROBINHOOD_TOTP_SECRET`
+  removes the prompt entirely. After a failure the server caches the error for
+  ~5 min; restart Claude Desktop to retry sooner.
 
 **"Non-base32 digit found" error:**
 

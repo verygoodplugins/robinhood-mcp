@@ -55,7 +55,17 @@ robinhood-mcp
 |----------|----------|-------------|
 | `ROBINHOOD_USERNAME` | Yes | Robinhood account email |
 | `ROBINHOOD_PASSWORD` | Yes | Robinhood account password |
-| `ROBINHOOD_TOTP_SECRET` | No | Base32 TOTP secret for 2FA |
+| `ROBINHOOD_TOTP_SECRET` | Recommended | Base32 TOTP secret for 2FA. Strongly recommended for Claude Desktop / headless use — without it, fresh logins fall back to mobile-app push approval, which synchronously blocks the single-threaded MCP server. |
+| `ROBINHOOD_APPROVAL_TIMEOUT` | No | Seconds to wait for push approval (default `60`). Bounds the worst-case server freeze when no TOTP is configured. |
+
+## Auth failure caching
+
+`server.py` `_ensure_logged_in()` caches transient `AuthenticationError`
+failures for ~5 minutes (`_AUTH_FAILURE_COOLDOWN_SECONDS`) so subsequent tool
+calls fail fast instead of re-running the full robin_stocks login flow. After
+the cooldown, one fresh attempt is allowed; restarting Claude Desktop clears
+it immediately. `EnvironmentVariablesError` (missing creds) is still treated
+as permanent — restart is required after fixing config.
 
 ## Testing
 

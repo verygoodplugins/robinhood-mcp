@@ -1,5 +1,6 @@
 """FastMCP server for Robinhood portfolio research."""
 
+import math
 import sys
 import threading
 import time
@@ -47,6 +48,15 @@ _cached_login_status: bool | None = None
 _cached_login_status_ts = 0.0
 _LOGIN_STATUS_TTL_SECONDS = 5.0
 
+# Cache transient AuthenticationError failures so repeated tool calls don't
+# each re-run the full robin_stocks login flow — that flow can synchronously
+# block the (single-threaded) MCP server for tens of seconds while polling
+# for mobile-app device approval. With the cache, only the first call pays
+# the cost; subsequent calls within the cooldown window fail fast.
+_auth_failure_message: str | None = None
+_auth_failure_ts = 0.0
+_AUTH_FAILURE_COOLDOWN_SECONDS = 300.0
+
 
 def _is_session_valid_cached() -> bool:
     """Return cached login status when fresh, otherwise probe Robinhood once."""
@@ -67,12 +77,32 @@ def _is_session_valid_cached() -> bool:
 
 def _ensure_logged_in() -> None:
     """Ensure we're logged in before API calls, re-attempting if session expired."""
-    global _login_attempted, _login_error, _cached_login_status, _cached_login_status_ts
+    global _login_attempted, _login_error
+    global _cached_login_status, _cached_login_status_ts
+    global _auth_failure_message, _auth_failure_ts
 
     with _login_lock:
         # Only explicit credential/config errors are treated as permanent.
         if _login_error:
             raise RobinhoodError(f"Not logged in: {_login_error}")
+
+        # Recent transient auth failure? Fail fast instead of re-running the
+        # full login flow and freezing the server again. Cooldown clears
+        # automatically so the server can recover after the user fixes things
+        # (or just restarts Claude Desktop).
+        if _auth_failure_message is not None:
+            elapsed = time.monotonic() - _auth_failure_ts
+            if elapsed < _AUTH_FAILURE_COOLDOWN_SECONDS:
+                # Ceil so the message never claims "0s" while still inside
+                # the cooldown — int() floors and would lie about sub-second
+                # tails.
+                remaining = math.ceil(_AUTH_FAILURE_COOLDOWN_SECONDS - elapsed)
+                raise RobinhoodError(
+                    f"Not logged in: {_auth_failure_message} "
+                    f"(cached failure; will retry in {remaining}s)"
+                )
+            # Cooldown elapsed — allow one fresh attempt.
+            _auth_failure_message = None
 
         session_valid = _is_session_valid_cached() if _login_attempted else False
         if not _login_attempted or not session_valid:
@@ -82,6 +112,7 @@ def _ensure_logged_in() -> None:
                 login()
                 _cached_login_status = True
                 _cached_login_status_ts = time.monotonic()
+                _auth_failure_message = None
                 print("[robinhood-mcp] Logged in to Robinhood", file=sys.stderr)
             except EnvironmentVariablesError as e:
                 _cached_login_status = False
@@ -93,6 +124,8 @@ def _ensure_logged_in() -> None:
                 _cached_login_status = False
                 _cached_login_status_ts = time.monotonic()
                 message = str(e)
+                _auth_failure_message = message
+                _auth_failure_ts = time.monotonic()
                 print(f"[robinhood-mcp] Login failed: {e}", file=sys.stderr)
                 raise RobinhoodError(f"Not logged in: {message}") from e
 

@@ -31,6 +31,31 @@ from robin_stocks.robinhood.helper import request_get, request_post
 
 logger = logging.getLogger(__name__)
 
+# How long the verification-workflow poll loops will block before failing.
+# 60 seconds is a forgiving window for a user to receive and tap the push
+# notification on their phone, but short enough that the single-threaded MCP
+# server doesn't freeze for minutes if approval never arrives. Override via
+# the ROBINHOOD_APPROVAL_TIMEOUT env var (seconds, float).
+_DEFAULT_APPROVAL_TIMEOUT_SECONDS = 60.0
+_MIN_APPROVAL_TIMEOUT_SECONDS = 5.0
+
+
+def _approval_timeout_seconds() -> float:
+    """Return the configured device-approval poll window, in seconds."""
+    raw = os.getenv("ROBINHOOD_APPROVAL_TIMEOUT")
+    if not raw:
+        return _DEFAULT_APPROVAL_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        print(
+            f"[robinhood-mcp] WARNING: ROBINHOOD_APPROVAL_TIMEOUT={raw!r} is "
+            f"not a number; using default {_DEFAULT_APPROVAL_TIMEOUT_SECONDS:.0f}s.",
+            file=sys.stderr,
+        )
+        return _DEFAULT_APPROVAL_TIMEOUT_SECONDS
+    return max(_MIN_APPROVAL_TIMEOUT_SECONDS, value)
+
 
 class AuthenticationError(Exception):
     """Raised when authentication fails."""
@@ -105,6 +130,8 @@ def _patched_validate_sherrif_id(
             f"Verification workflow failed — missing sheriff challenge ID{details}"
         )
 
+    approval_timeout = _approval_timeout_seconds()
+
     # If TOTP mfa_code is available, try direct challenge response first
     if mfa_code:
         challenge_url = f"https://api.robinhood.com/challenge/{challenge_id}/respond/"
@@ -115,7 +142,7 @@ def _patched_validate_sherrif_id(
             # Retry workflow finalization — the workflow may not be immediately
             # ready after TOTP validation (same race the push-approval path handles).
             totp_start = time.time()
-            while time.time() - totp_start < 120:
+            while time.time() - totp_start < approval_timeout:
                 result = _request_workflow_result(inquiries_url)
                 if result == "workflow_status_approved":
                     return
@@ -123,19 +150,21 @@ def _patched_validate_sherrif_id(
                     raise AuthenticationError(f"TOTP validated but workflow not approved: {result}")
                 time.sleep(5)
             raise AuthenticationError(
-                "TOTP validated but workflow finalization timed out after 2 minutes"
+                f"TOTP validated but workflow finalization timed out after {approval_timeout:.0f}s"
             )
 
     # Poll for mobile app approval
     prompts_url = f"https://api.robinhood.com/push/{challenge_id}/get_prompts_status/"
     print(
-        "\n[robinhood-mcp] Verification required — open the Robinhood app and approve the login.\n"
-        "[robinhood-mcp] Waiting up to 2 minutes...",
+        "\n[robinhood-mcp] Verification required — open the Robinhood app and approve the login."
+        f"\n[robinhood-mcp] Waiting up to {approval_timeout:.0f}s "
+        "(set ROBINHOOD_APPROVAL_TIMEOUT to override, or ROBINHOOD_TOTP_SECRET for "
+        "non-interactive 2FA)...",
         file=sys.stderr,
     )
 
     start = time.time()
-    while time.time() - start < 120:
+    while time.time() - start < approval_timeout:
         time.sleep(5)
         status_res = request_get(url=prompts_url)
         elapsed = int(time.time() - start)
@@ -160,7 +189,10 @@ def _patched_validate_sherrif_id(
             raise AuthenticationError(f"Challenge validated but workflow not approved: {result}")
         print(f"[robinhood-mcp] Waiting for approval... ({elapsed}s)", file=sys.stderr)
 
-    raise AuthenticationError("Login timed out after 2 minutes. Restart server and approve in app.")
+    raise AuthenticationError(
+        f"Login timed out after {approval_timeout:.0f}s. Approve in app and call the tool "
+        "again, or set ROBINHOOD_TOTP_SECRET for non-interactive 2FA."
+    )
 
 
 # Apply the monkey-patch before any login calls
