@@ -21,16 +21,20 @@
   ],
   "tools": [
     {
+      "name": "robinhood_get_accounts",
+      "description": "List account numbers for available Robinhood accounts"
+    },
+    {
       "name": "robinhood_get_portfolio",
-      "description": "Get portfolio value and performance"
+      "description": "Get portfolio value and performance, optionally by account"
     },
     {
       "name": "robinhood_get_positions",
-      "description": "Get current stock holdings"
+      "description": "Get current stock holdings, optionally by account"
     },
     {
       "name": "robinhood_get_position",
-      "description": "Get one stock holding by ticker"
+      "description": "Get one stock holding by ticker, optionally by account"
     },
     {
       "name": "robinhood_get_watchlist",
@@ -62,15 +66,15 @@
     },
     {
       "name": "robinhood_get_dividends",
-      "description": "Get dividend payment history"
+      "description": "Get dividend payment history, optionally by account"
     },
     {
       "name": "robinhood_get_options_positions",
-      "description": "Get options positions"
+      "description": "Get options positions, optionally by account"
     },
     {
       "name": "robinhood_get_order_history",
-      "description": "Get stock order history (buys and sells)"
+      "description": "Get stock order history (buys and sells), optionally by account"
     },
     {
       "name": "robinhood_search_symbols",
