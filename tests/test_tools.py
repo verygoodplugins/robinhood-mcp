@@ -393,6 +393,28 @@ class TestGetPositions:
         mock_open_positions.assert_called_once_with(account_number="IRA123")
         mock_build_holdings.assert_not_called()
 
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    def test_account_number_skips_zero_quantity_positions(
+        self,
+        mock_open_positions: MagicMock,
+        mock_symbol: MagicMock,
+        mock_get_quote: MagicMock,
+    ):
+        """Should skip fully closed rows returned by open-stock-position API."""
+        mock_open_positions.return_value = [
+            {
+                "instrument": "https://instrument/hims/",
+                "quantity": "0.00000000",
+                "average_buy_price": "20.00",
+            }
+        ]
+
+        assert get_positions(account_number="IRA123") == {}
+        mock_symbol.assert_not_called()
+        mock_get_quote.assert_not_called()
+
 
 class TestGetPosition:
     """Tests for get_position function."""
@@ -506,6 +528,30 @@ class TestGetPosition:
         assert result["held"] is True
         mock_open_positions.assert_called_once_with(account_number="IRA123")
         mock_build_holdings.assert_not_called()
+
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
+    def test_zero_quantity_account_position_returns_not_held(
+        self,
+        mock_get_instruments: MagicMock,
+        mock_open_positions: MagicMock,
+        mock_get_quote: MagicMock,
+    ):
+        """Should report held=False for fully closed account-specific rows."""
+        mock_get_instruments.return_value = [{"url": "https://instrument/hims/"}]
+        mock_open_positions.return_value = [
+            {
+                "instrument": "https://instrument/hims/",
+                "quantity": "0.00000000",
+                "average_buy_price": "20.00",
+            }
+        ]
+
+        result = get_position("HIMS", account_number="IRA123")
+
+        assert result == {"symbol": "HIMS", "held": False}
+        mock_get_quote.assert_not_called()
 
     @patch("robinhood_mcp.tools.get_quote")
     @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")

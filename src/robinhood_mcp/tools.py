@@ -179,6 +179,17 @@ def _slim_positions(positions: dict[str, dict[str, Any]]) -> dict[str, dict[str,
     }
 
 
+def _is_zero_quantity_position(position: dict[str, Any]) -> bool:
+    """Return whether a raw position row has a parseable zero quantity."""
+    quantity = position.get("quantity")
+    if quantity in (None, ""):
+        return False
+    try:
+        return float(quantity) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 def _position_data_from_open_position(symbol: str, position: dict[str, Any]) -> dict[str, Any]:
     """Build slim position fields from one raw open-position row."""
     quote = get_quote(symbol)
@@ -221,6 +232,8 @@ def _build_account_holdings(account_number: str) -> dict[str, dict[str, Any]]:
     holdings: dict[str, dict[str, Any]] = {}
     for position in positions:
         if not isinstance(position, dict):
+            continue
+        if _is_zero_quantity_position(position):
             continue
         symbol = _resolve_symbol_by_url(position.get("instrument") or "")
         if symbol is None:
@@ -327,7 +340,9 @@ def get_position(symbol: str, account_number: str | None = None) -> dict[str, An
         (
             item
             for item in positions
-            if isinstance(item, dict) and item.get("instrument") == instrument_url
+            if isinstance(item, dict)
+            and item.get("instrument") == instrument_url
+            and not _is_zero_quantity_position(item)
         ),
         None,
     )
