@@ -156,6 +156,7 @@ claude mcp add robinhood -- uvx robinhood-mcp
 
 | Tool                              | Description                                          |
 | --------------------------------- | ---------------------------------------------------- |
+| `robinhood_get_accounts`          | Account numbers for available Robinhood accounts     |
 | `robinhood_get_portfolio`         | Portfolio value, equity, buying power, day change    |
 | `robinhood_get_positions`         | All holdings with cost basis, current value, P&L     |
 | `robinhood_get_position`          | One holding by ticker with quantity, value, and P&L  |
@@ -171,6 +172,21 @@ claude mcp add robinhood -- uvx robinhood-mcp
 | `robinhood_get_order_history`     | Order history (buys/sells) with per-fill detail      |
 | `robinhood_search_symbols`        | Search stocks by name or ticker                      |
 
+### Account Selection
+
+If your Robinhood login has multiple accounts, call `robinhood_get_accounts`
+first and pass the returned `account_number` to account-scoped tools. Omit
+`account_number` to use Robinhood's default account.
+
+Tools with optional `account_number` support:
+
+- `robinhood_get_portfolio`
+- `robinhood_get_positions`
+- `robinhood_get_position`
+- `robinhood_get_dividends`
+- `robinhood_get_options_positions`
+- `robinhood_get_order_history`
+
 ## Example Conversations
 
 **Simple queries:**
@@ -178,6 +194,7 @@ claude mcp add robinhood -- uvx robinhood-mcp
 - "What's my portfolio worth right now?"
 - "Show me my top 5 holdings by value"
 - "Do I already own HIMS, and what's my current position?"
+- "List my Robinhood accounts, then show positions for my IRA account."
 - "Get me a quote for AAPL"
 
 For single-symbol portfolio questions, prefer `robinhood_get_position` over

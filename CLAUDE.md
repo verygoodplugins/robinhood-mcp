@@ -12,7 +12,7 @@ This file provides guidance to Claude Code when working with this repository.
 src/robinhood_mcp/
 ├── __init__.py      # Package version
 ├── auth.py          # Authentication with TOTP support
-├── tools.py         # 14 read-only tool implementations
+├── tools.py         # 15 read-only tool implementations
 └── server.py        # FastMCP server with tool registration
 ```
 

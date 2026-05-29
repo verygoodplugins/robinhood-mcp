@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 from .auth import AuthenticationError, EnvironmentVariablesError, is_logged_in, login
 from .tools import (
     RobinhoodError,
+    get_accounts,
     get_dividends,
     get_earnings,
     get_fundamentals,
@@ -131,39 +132,57 @@ def _ensure_logged_in() -> None:
 
 
 @mcp.tool()
-def robinhood_get_portfolio() -> dict:
+def robinhood_get_accounts() -> list:
+    """List available Robinhood accounts for account_number selection.
+
+    Use this to find account numbers for account-scoped tools when a Robinhood
+    login has multiple accounts, such as a taxable account and IRA.
+    """
+    _ensure_logged_in()
+    return get_accounts()
+
+
+@mcp.tool()
+def robinhood_get_portfolio(account_number: str | None = None) -> dict:
     """Get current portfolio value and performance metrics.
+
+    Args:
+        account_number: Optional Robinhood account number. Omit for the default account.
 
     Returns portfolio profile with equity, extended hours equity,
     withdrawable amount, and other account details.
     """
     _ensure_logged_in()
-    return get_portfolio()
+    return get_portfolio(account_number)
 
 
 @mcp.tool()
-def robinhood_get_positions() -> dict:
+def robinhood_get_positions(account_number: str | None = None) -> dict:
     """Get all current stock positions with details.
+
+    Args:
+        account_number: Optional Robinhood account number. Omit for the default account.
 
     Returns a dict mapping stock symbols to position details including
     price, quantity, average buy price, equity, and percent change.
     """
     _ensure_logged_in()
-    return get_positions()
+    return get_positions(account_number)
 
 
 @mcp.tool()
-def robinhood_get_position(symbol: str) -> dict:
+def robinhood_get_position(symbol: str, account_number: str | None = None) -> dict:
     """Get one current stock position with a faster single-symbol lookup.
 
     Args:
         symbol: Stock ticker symbol (e.g., "HIMS", "AAPL")
+        account_number: Optional Robinhood account number. Omit for the default account.
 
     Returns a dict with held=False if absent, otherwise the position details
     for that symbol including quantity, price, average buy price, and P&L.
     """
     _ensure_logged_in()
-    return get_position(symbol)
+    return get_position(symbol, account_number)
 
 
 @mcp.tool()
@@ -269,25 +288,31 @@ def robinhood_get_ratings(symbol: str) -> dict:
 
 
 @mcp.tool()
-def robinhood_get_dividends() -> list:
+def robinhood_get_dividends(account_number: str | None = None) -> list:
     """Get all dividend payments received.
+
+    Args:
+        account_number: Optional Robinhood account number. Omit for all returned dividends.
 
     Returns list of dividend payments with amount, payable date,
     record date, and instrument details.
     """
     _ensure_logged_in()
-    return get_dividends()
+    return get_dividends(account_number)
 
 
 @mcp.tool()
-def robinhood_get_options_positions() -> list:
+def robinhood_get_options_positions(account_number: str | None = None) -> list:
     """Get all current options positions (read-only).
+
+    Args:
+        account_number: Optional Robinhood account number. Omit for the default account.
 
     Returns list of options positions with chain symbol, type,
     strike price, expiration, and quantity.
     """
     _ensure_logged_in()
-    return get_options_positions()
+    return get_options_positions(account_number)
 
 
 @mcp.tool()
@@ -296,6 +321,7 @@ def robinhood_get_order_history(
     state: Literal["executed", "all"] = "executed",
     limit: int = 50,
     start_date: str | None = None,
+    account_number: str | None = None,
 ) -> list:
     """Get historical stock order history (executed buys and sells).
 
@@ -309,13 +335,14 @@ def robinhood_get_order_history(
             partial fills; "all" also returns cancelled/queued/rejected orders.
         limit: Maximum number of orders to return, most recent first.
         start_date: Optional "YYYY-MM-DD" lower bound, applied server-side.
+        account_number: Optional Robinhood account number. Omit for the default account.
 
     Returns a list of order rows (newest first) with symbol, side, state,
     quantity, filled quantity, average price, type, timestamps, and per-fill
     executions.
     """
     _ensure_logged_in()
-    return get_order_history(symbol, state, limit, start_date)
+    return get_order_history(symbol, state, limit, start_date, account_number)
 
 
 @mcp.tool()

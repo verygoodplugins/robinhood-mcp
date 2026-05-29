@@ -74,6 +74,76 @@ def _make_order(
     }
 
 
+class TestGetAccounts:
+    """Tests for get_accounts function."""
+
+    @patch("robinhood_mcp.tools.rh.profiles.load_account_profile")
+    def test_returns_slimmed_account_profiles(self, mock_profile: MagicMock):
+        """Should return account profiles with fields useful for selection."""
+        mock_profile.return_value = [
+            {
+                "account_number": "IRA123",
+                "type": "traditional_ira",
+                "state": "active",
+                "buying_power": "100.00",
+                "cash": "50.00",
+                "portfolio_cash": "25.00",
+                "cash_available_for_withdrawal": "10.00",
+                "deactivated": False,
+                "locked": False,
+                "url": "https://api.robinhood.com/accounts/IRA123/",
+                "user": "https://api.robinhood.com/user/",
+            },
+            {
+                "account_number": "TAXABLE456",
+                "type": "margin",
+                "state": "active",
+                "buying_power": "200.00",
+                "cash": "75.00",
+                "portfolio_cash": "35.00",
+                "cash_available_for_withdrawal": "20.00",
+                "deactivated": False,
+                "locked": False,
+            },
+        ]
+
+        result = tools_module.get_accounts()
+
+        assert result == [
+            {
+                "account_number": "IRA123",
+                "type": "traditional_ira",
+                "state": "active",
+                "buying_power": "100.00",
+                "cash": "50.00",
+                "portfolio_cash": "25.00",
+                "cash_available_for_withdrawal": "10.00",
+                "deactivated": False,
+                "locked": False,
+            },
+            {
+                "account_number": "TAXABLE456",
+                "type": "margin",
+                "state": "active",
+                "buying_power": "200.00",
+                "cash": "75.00",
+                "portfolio_cash": "35.00",
+                "cash_available_for_withdrawal": "20.00",
+                "deactivated": False,
+                "locked": False,
+            },
+        ]
+        mock_profile.assert_called_once_with(dataType="results")
+
+    @patch("robinhood_mcp.tools.rh.profiles.load_account_profile")
+    def test_raises_on_non_list_response(self, mock_profile: MagicMock):
+        """Should raise RobinhoodError when account list has an unexpected shape."""
+        mock_profile.return_value = {"unexpected": "shape"}
+
+        with pytest.raises(RobinhoodError):
+            tools_module.get_accounts()
+
+
 class TestGetPortfolio:
     """Tests for get_portfolio function."""
 
@@ -90,6 +160,24 @@ class TestGetPortfolio:
 
         assert result == expected
         mock_profile.assert_called_once()
+
+    @patch("robinhood_mcp.tools.rh.profiles.load_portfolio_profile")
+    def test_forwards_account_number(self, mock_profile: MagicMock):
+        """Should request a specific account's portfolio when account_number is given."""
+        mock_profile.return_value = {"equity": "2500.00"}
+
+        result = get_portfolio(account_number=" IRA123 ")
+
+        assert result == {"equity": "2500.00"}
+        mock_profile.assert_called_once_with(account_number="IRA123")
+
+    @patch("robinhood_mcp.tools.rh.profiles.load_portfolio_profile")
+    def test_rejects_invalid_account_number(self, mock_profile: MagicMock):
+        """Should reject unsafe account numbers before they reach robin_stocks."""
+        with pytest.raises(RobinhoodError):
+            get_portfolio(account_number="IRA123&account_numbers=OTHER")
+
+        mock_profile.assert_not_called()
 
     @patch("robinhood_mcp.tools.rh.profiles.load_portfolio_profile")
     def test_raises_on_none_result(self, mock_profile: MagicMock):
@@ -268,6 +356,65 @@ class TestGetPositions:
         assert get_positions() == {}
         assert mock_holdings.call_count == 1
 
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    @patch("robinhood_mcp.tools.rh.account.build_holdings")
+    def test_account_number_uses_account_specific_positions(
+        self,
+        mock_build_holdings: MagicMock,
+        mock_open_positions: MagicMock,
+        mock_symbol: MagicMock,
+        mock_get_quote: MagicMock,
+    ):
+        """Should build holdings from the selected account's open positions."""
+        mock_open_positions.return_value = [
+            {
+                "instrument": "https://instrument/hims/",
+                "quantity": "10.00000000",
+                "average_buy_price": "20.00",
+            }
+        ]
+        mock_symbol.return_value = "HIMS"
+        mock_get_quote.return_value = {"last_trade_price": "21.50"}
+
+        result = get_positions(account_number="IRA123")
+
+        assert result == {
+            "HIMS": {
+                "price": "21.50",
+                "quantity": "10.00000000",
+                "average_buy_price": "20.00",
+                "equity": "215.00",
+                "percent_change": "7.50",
+                "equity_change": "15.00",
+            }
+        }
+        mock_open_positions.assert_called_once_with(account_number="IRA123")
+        mock_build_holdings.assert_not_called()
+
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    def test_account_number_skips_zero_quantity_positions(
+        self,
+        mock_open_positions: MagicMock,
+        mock_symbol: MagicMock,
+        mock_get_quote: MagicMock,
+    ):
+        """Should skip fully closed rows returned by open-stock-position API."""
+        mock_open_positions.return_value = [
+            {
+                "instrument": "https://instrument/hims/",
+                "quantity": "0.00000000",
+                "average_buy_price": "20.00",
+            }
+        ]
+
+        assert get_positions(account_number="IRA123") == {}
+        mock_symbol.assert_not_called()
+        mock_get_quote.assert_not_called()
+
 
 class TestGetPosition:
     """Tests for get_position function."""
@@ -352,6 +499,59 @@ class TestGetPosition:
         mock_open_positions.assert_called_once_with()
         mock_get_quote.assert_called_once_with("HIMS")
         mock_build_holdings.assert_not_called()
+
+    @patch("robinhood_mcp.tools.rh.account.build_holdings")
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
+    def test_forwards_account_number_to_single_position_lookup(
+        self,
+        mock_get_instruments: MagicMock,
+        mock_open_positions: MagicMock,
+        mock_get_quote: MagicMock,
+        mock_build_holdings: MagicMock,
+    ):
+        """Should search one symbol inside the selected account."""
+        mock_get_instruments.return_value = [{"url": "https://instrument/hims/"}]
+        mock_open_positions.return_value = [
+            {
+                "instrument": "https://instrument/hims/",
+                "quantity": "10.00000000",
+                "average_buy_price": "20.00",
+            }
+        ]
+        mock_get_quote.return_value = {"last_trade_price": "21.50"}
+
+        result = get_position("HIMS", account_number="IRA123")
+
+        assert result["symbol"] == "HIMS"
+        assert result["held"] is True
+        mock_open_positions.assert_called_once_with(account_number="IRA123")
+        mock_build_holdings.assert_not_called()
+
+    @patch("robinhood_mcp.tools.get_quote")
+    @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
+    @patch("robinhood_mcp.tools.rh.stocks.get_instruments_by_symbols")
+    def test_zero_quantity_account_position_returns_not_held(
+        self,
+        mock_get_instruments: MagicMock,
+        mock_open_positions: MagicMock,
+        mock_get_quote: MagicMock,
+    ):
+        """Should report held=False for fully closed account-specific rows."""
+        mock_get_instruments.return_value = [{"url": "https://instrument/hims/"}]
+        mock_open_positions.return_value = [
+            {
+                "instrument": "https://instrument/hims/",
+                "quantity": "0.00000000",
+                "average_buy_price": "20.00",
+            }
+        ]
+
+        result = get_position("HIMS", account_number="IRA123")
+
+        assert result == {"symbol": "HIMS", "held": False}
+        mock_get_quote.assert_not_called()
 
     @patch("robinhood_mcp.tools.get_quote")
     @patch("robinhood_mcp.tools.rh.account.get_open_stock_positions")
@@ -523,6 +723,33 @@ class TestGetDividends:
 
         assert result == expected
 
+    @patch("robinhood_mcp.tools.rh.account.get_dividends")
+    def test_filters_dividends_by_account_number(self, mock_divs: MagicMock):
+        """Should return only dividends for the selected account."""
+        mock_divs.return_value = [
+            {
+                "amount": "0.23",
+                "payable_date": "2024-02-15",
+                "account": "https://api.robinhood.com/accounts/IRA123/",
+            },
+            {
+                "amount": "0.42",
+                "payable_date": "2024-02-16",
+                "account": "https://api.robinhood.com/accounts/TAXABLE456/",
+            },
+        ]
+
+        result = get_dividends(account_number="IRA123")
+
+        assert result == [
+            {
+                "amount": "0.23",
+                "payable_date": "2024-02-15",
+                "account": "https://api.robinhood.com/accounts/IRA123/",
+            }
+        ]
+        mock_divs.assert_called_once_with()
+
 
 class TestGetOptionsPositions:
     """Tests for get_options_positions function."""
@@ -536,6 +763,16 @@ class TestGetOptionsPositions:
         result = get_options_positions()
 
         assert result == expected
+
+    @patch("robinhood_mcp.tools.rh.options.get_open_option_positions")
+    def test_forwards_account_number(self, mock_options: MagicMock):
+        """Should request option positions for the selected account."""
+        mock_options.return_value = [{"chain_symbol": "AAPL", "type": "call", "quantity": "1"}]
+
+        result = get_options_positions(account_number="IRA123")
+
+        assert result == [{"chain_symbol": "AAPL", "type": "call", "quantity": "1"}]
+        mock_options.assert_called_once_with(account_number="IRA123")
 
 
 class TestGetWatchlist:
@@ -737,6 +974,20 @@ class TestGetOrderHistory:
         get_order_history(start_date="2026-01-01")
 
         assert mock_orders.call_args.kwargs.get("start_date") == "2026-01-01"
+
+    @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
+    @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")
+    def test_account_number_forwarded_to_api(self, mock_orders: MagicMock, mock_symbol: MagicMock):
+        """account_number should be forwarded to robin_stocks order history."""
+        mock_symbol.return_value = "HIMS"
+        mock_orders.return_value = [_make_order()]
+
+        get_order_history(account_number="IRA123", start_date="2026-01-01")
+
+        assert mock_orders.call_args.kwargs == {
+            "start_date": "2026-01-01",
+            "account_number": "IRA123",
+        }
 
     @patch("robinhood_mcp.tools.rh.stocks.get_symbol_by_url")
     @patch("robinhood_mcp.tools.rh.orders.get_all_stock_orders")

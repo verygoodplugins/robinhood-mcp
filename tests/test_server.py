@@ -33,6 +33,11 @@ def reset_server_state():
     server._auth_failure_ts = 0.0
 
 
+def _call_tool(tool, *args, **kwargs):
+    """Call either a plain FastMCP function or a FunctionTool wrapper."""
+    return getattr(tool, "fn", tool)(*args, **kwargs)
+
+
 class TestEnsureLoggedInCooldown:
     """Failure-fast cooldown for transient AuthenticationError."""
 
@@ -104,3 +109,40 @@ class TestEnsureLoggedInCooldown:
         assert mock_login.call_count == 1
         # The permanent-error message must not carry the transient-failure suffix.
         assert "cached failure" not in str(exc_info.value)
+
+
+class TestAccountNumberForwarding:
+    """Server wrappers forward optional account selection to tool functions."""
+
+    @patch("robinhood_mcp.server.get_portfolio")
+    @patch("robinhood_mcp.server._ensure_logged_in")
+    def test_portfolio_forwards_account_number(
+        self, mock_ensure: MagicMock, mock_get_portfolio: MagicMock
+    ):
+        mock_get_portfolio.return_value = {"equity": "2500.00"}
+
+        result = _call_tool(server.robinhood_get_portfolio, account_number="IRA123")
+
+        assert result == {"equity": "2500.00"}
+        mock_ensure.assert_called_once_with()
+        mock_get_portfolio.assert_called_once_with("IRA123")
+
+    @patch("robinhood_mcp.server.get_order_history")
+    @patch("robinhood_mcp.server._ensure_logged_in")
+    def test_order_history_forwards_account_number(
+        self, mock_ensure: MagicMock, mock_get_order_history: MagicMock
+    ):
+        mock_get_order_history.return_value = []
+
+        result = _call_tool(
+            server.robinhood_get_order_history,
+            symbol="HIMS",
+            state="all",
+            limit=10,
+            start_date="2026-01-01",
+            account_number="IRA123",
+        )
+
+        assert result == []
+        mock_ensure.assert_called_once_with()
+        mock_get_order_history.assert_called_once_with("HIMS", "all", 10, "2026-01-01", "IRA123")
