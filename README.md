@@ -16,7 +16,9 @@ A read-only MCP server for Robinhood portfolio research. Wraps [robin_stocks](ht
 
 ## Demo
 
-[Watch the simulated product demo](https://github.com/user-attachments/assets/454263bc-8da7-4644-89df-c48e5401dbac)
+<video src="https://github.com/user-attachments/assets/c690d641-8f8d-4bbd-8462-3d2c2e25b38e" controls muted playsinline></video>
+
+<p><a href="https://github.com/verygoodplugins/robinhood-mcp/pull/20#issuecomment-4579826755">Watch the simulated product demo</a></p>
 
 This demo uses simulated account data and a generic assistant interface. It shows read-only research workflows only; it does not show real credentials, real holdings, professional advice, or trade execution.
 
