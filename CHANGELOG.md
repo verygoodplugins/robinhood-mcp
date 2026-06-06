@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3](https://github.com/verygoodplugins/robinhood-mcp/compare/v0.1.2...v0.1.3) (2026-04-22)
+
+
+### Performance Improvements
+
+* slim get_positions response to reduce context window bloat ([#13](https://github.com/verygoodplugins/robinhood-mcp/issues/13)) ([d0849f3](https://github.com/verygoodplugins/robinhood-mcp/commit/d0849f32f18d746d3ee9d19f71759fdaaac819dd))
+
 ## [0.1.2](https://github.com/verygoodplugins/robinhood-mcp/compare/v0.1.1...v0.1.2) (2026-03-08)
 
 
