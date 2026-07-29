@@ -1,3 +1,4 @@
+import os
 """FastMCP server for Robinhood portfolio research."""
 
 import math
@@ -362,7 +363,9 @@ def robinhood_search_symbols(query: str) -> list:
 
 def main() -> None:
     """Run the MCP server."""
-    install_stdio_parent_watchdog('ROBINHOOD_PARENT_WATCHDOG_S')
+    # Capture before any await — os.getppid() is dynamic.
+    parent_pid = os.getppid()
+    install_stdio_parent_watchdog('ROBINHOOD_PARENT_WATCHDOG_S', parent_pid=parent_pid)
     mcp.run()
 
 
