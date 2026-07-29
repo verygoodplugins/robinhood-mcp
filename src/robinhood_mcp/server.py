@@ -11,6 +11,7 @@ from fastmcp import FastMCP
 
 from .auth import AuthenticationError, EnvironmentVariablesError, is_logged_in, login
 from .tools import (
+from .parent_watchdog import install_stdio_parent_watchdog
     RobinhoodError,
     get_accounts,
     get_dividends,
@@ -361,6 +362,7 @@ def robinhood_search_symbols(query: str) -> list:
 
 def main() -> None:
     """Run the MCP server."""
+    install_stdio_parent_watchdog('ROBINHOOD_PARENT_WATCHDOG_S')
     mcp.run()
 
 
