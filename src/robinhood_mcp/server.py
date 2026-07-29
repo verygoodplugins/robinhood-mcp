@@ -1,6 +1,7 @@
 """FastMCP server for Robinhood portfolio research."""
 
 import math
+import os
 import sys
 import threading
 import time
@@ -10,6 +11,7 @@ from dotenv import load_dotenv
 from fastmcp import FastMCP
 
 from .auth import AuthenticationError, EnvironmentVariablesError, is_logged_in, login
+from .parent_watchdog import install_stdio_parent_watchdog
 from .tools import (
     RobinhoodError,
     get_accounts,
@@ -28,6 +30,9 @@ from .tools import (
     get_watchlist,
     search_symbols,
 )
+
+# Pin after imports, before FastMCP / tool registration — getppid is dynamic.
+_PARENT_PID = os.getppid()
 
 # Load environment variables
 load_dotenv()
@@ -361,6 +366,7 @@ def robinhood_search_symbols(query: str) -> list:
 
 def main() -> None:
     """Run the MCP server."""
+    install_stdio_parent_watchdog("ROBINHOOD_PARENT_WATCHDOG_S", parent_pid=_PARENT_PID)
     mcp.run()
 
 
