@@ -1,7 +1,7 @@
-import os
 """FastMCP server for Robinhood portfolio research."""
 
 import math
+import os
 import sys
 import threading
 import time
@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 from fastmcp import FastMCP
 
 from .auth import AuthenticationError, EnvironmentVariablesError, is_logged_in, login
-from .tools import (
 from .parent_watchdog import install_stdio_parent_watchdog
+from .tools import (
     RobinhoodError,
     get_accounts,
     get_dividends,
