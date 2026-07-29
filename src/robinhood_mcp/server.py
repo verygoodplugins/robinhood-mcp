@@ -366,7 +366,7 @@ def robinhood_search_symbols(query: str) -> list:
 
 def main() -> None:
     """Run the MCP server."""
-    install_stdio_parent_watchdog('ROBINHOOD_PARENT_WATCHDOG_S', parent_pid=_PARENT_PID)
+    install_stdio_parent_watchdog("ROBINHOOD_PARENT_WATCHDOG_S", parent_pid=_PARENT_PID)
     mcp.run()
 
 
