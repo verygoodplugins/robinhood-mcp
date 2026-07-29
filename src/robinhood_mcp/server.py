@@ -31,6 +31,9 @@ from .tools import (
     search_symbols,
 )
 
+# Pin after imports, before FastMCP / tool registration — getppid is dynamic.
+_PARENT_PID = os.getppid()
+
 # Load environment variables
 load_dotenv()
 
@@ -363,9 +366,7 @@ def robinhood_search_symbols(query: str) -> list:
 
 def main() -> None:
     """Run the MCP server."""
-    # Capture before any await — os.getppid() is dynamic.
-    parent_pid = os.getppid()
-    install_stdio_parent_watchdog('ROBINHOOD_PARENT_WATCHDOG_S', parent_pid=parent_pid)
+    install_stdio_parent_watchdog('ROBINHOOD_PARENT_WATCHDOG_S', parent_pid=_PARENT_PID)
     mcp.run()
 
 
